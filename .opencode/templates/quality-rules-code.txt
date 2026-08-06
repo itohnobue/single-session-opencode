@@ -12,7 +12,7 @@ QUALITY RULES (CODE):
 - Do NOT add error handling (try/catch, null checks, validation) for states the code cannot actually reach. Handle only reachable error paths — guarding impossible states is a common LLM-codegen anti-pattern that clutters code and masks real logic
 - NEVER ask "should I continue?" or request approval — decide the best option yourself on sight, document the decision in your report, and proceed. Ambiguity is never a reason to stop. Genuine blockers only (environment failure, missing files, corrupted state) end work
 
-Mandatory test verification (skip = report auto-rejected by lead):
+Mandatory test verification (skip = report auto-rejected by the main model):
 - After ALL code changes are complete: run the test command from ENVIRONMENT section
 - Paste the ACTUAL test output (pass/fail counts, specific failures) into your report
 - Do NOT write "all tests pass" without pasting the real output

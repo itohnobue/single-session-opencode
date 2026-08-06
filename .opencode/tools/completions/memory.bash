@@ -3,66 +3,48 @@
 # source /path/to/memory.bash
 
 _memory_completions() {
-    local cur prev commands categories options
+    local cur prev commands categories options session_subcommands
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
 
-    commands="add search context list rebuild delete stats maintain"
+    commands="add search context list delete stats session"
+    session_subcommands="add list show update delete clear archive use current sessions list-all show-all"
     categories="architecture discovery pattern gotcha config entity decision todo reference context"
-    options="-h --help -t --tags -l --limit -c --category -o --output -q --quiet -v --version --max-age --execute"
+    options="-h --help -t --tags -l --limit -c --category -s --status -S --session -o --output -q --quiet -v --version"
 
     # First argument: command
-    if [[ ${COMP_CWORD} -eq 1 ]]; then
-        COMPREPLY=( $(compgen -W "${commands} ${options}" -- "${cur}") )
-        return 0
+    if [[ $COMP_CWORD -eq 1 ]]; then
+        COMPREPLY=( $(compgen -W "$commands" -- "$cur") )
+        return
     fi
 
-    # Command-specific completions
-    case "${COMP_WORDS[1]}" in
-        add)
-            if [[ ${COMP_CWORD} -eq 2 ]]; then
-                # Second arg after add: category
-                COMPREPLY=( $(compgen -W "${categories}" -- "${cur}") )
-            fi
-            ;;
-        search|context)
-            # No specific completions for query
-            ;;
-        list)
-            case "${prev}" in
-                -c|--category)
-                    COMPREPLY=( $(compgen -W "${categories}" -- "${cur}") )
-                    ;;
-                *)
-                    COMPREPLY=( $(compgen -W "-c --category -l --limit -o --output" -- "${cur}") )
-                    ;;
-            esac
-            ;;
-        delete)
-            # Could potentially complete with existing IDs, but that requires running the tool
-            ;;
-        maintain)
-            COMPREPLY=( $(compgen -W "--max-age --execute -o --output" -- "${cur}") )
-            ;;
+    local cmd="${COMP_WORDS[1]}"
+
+    # Session subcommand as second argument
+    if [[ "$cmd" == "session" && $COMP_CWORD -eq 2 ]]; then
+        COMPREPLY=( $(compgen -W "$session_subcommands" -- "$cur") )
+        return
+    fi
+
+    # Options after command
+    case "$prev" in
+        -t|--tags)     return ;;
+        -l|--limit)    COMPREPLY=( $(compgen -W "5 10 20 50 100" -- "$cur") ); return ;;
+        -c|--category) COMPREPLY=( $(compgen -W "$categories" -- "$cur") ); return ;;
+        -s|--status)   COMPREPLY=( $(compgen -W "pending in_progress completed blocked" -- "$cur") ); return ;;
+        -S|--session)  return ;;
+        -o|--output)   COMPREPLY=( $(compgen -W "text json" -- "$cur") ); return ;;
     esac
 
-    # Option value completions
-    case "${prev}" in
-        -c|--category)
-            COMPREPLY=( $(compgen -W "${categories}" -- "${cur}") )
-            ;;
-        -o|--output)
-            COMPREPLY=( $(compgen -W "text json" -- "${cur}") )
-            ;;
-        -l|--limit)
-            COMPREPLY=( $(compgen -W "5 10 20 50 100" -- "${cur}") )
-            ;;
-    esac
+    # Add: category as second arg
+    if [[ "$cmd" == "add" && $COMP_CWORD -eq 2 ]]; then
+        COMPREPLY=( $(compgen -W "$categories" -- "$cur") )
+        return
+    fi
 
-    return 0
+    COMPREPLY=( $(compgen -W "$options" -- "$cur") )
 }
 
 complete -F _memory_completions memory.sh
-complete -F _memory_completions ./memory.sh
-complete -F _memory_completions ./.opencode/tools/memory.sh
+complete -F _memory_completions memory.bat

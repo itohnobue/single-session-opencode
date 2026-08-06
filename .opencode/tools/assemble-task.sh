@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # assemble-task.sh — Compose a task prompt for native opencode subagent delegation
 #
-# Replacement for assemble-prompt.sh. Builds ONLY the task prompt (templates +
+# Builds ONLY the task prompt (templates +
 # task assignment) — the agent .md is loaded natively by opencode as the subagent's
 # system prompt, so it is NOT embedded here.
 #
@@ -15,12 +15,12 @@
 # Arguments:
 #   -a, --agent       Agent name — validates .opencode/agents/{agent}.md exists
 #   -t, --task-type   Task type: review | code | research
-#   -n, --name        Agent instance name (e.g. s1-reviewer, s2i1-impl-auth)
+#   -n, --name        Agent instance name (e.g. review-auth, impl-db, research-web)
 #   --task            Path to task assignment file (PROJECT, ENVIRONMENT,
-#                     PRIOR CONTEXT, YOUR TASK, WRITABLE FILES — lead-written)
+#                     PRIOR CONTEXT, YOUR TASK, WRITABLE FILES — main-model-written)
 #   -o, --output      Override output path (default: tmp/{name}-task-prompt.txt)
 #
-# Task type → template selection (same as assemble-prompt.sh):
+# Task type → template selection:
 #   review:   coordination-review + severity-guide + quality-rules-review
 #   code:     coordination-code   +                  quality-rules-code
 #   research: coordination-review +                  quality-rules-review
@@ -30,10 +30,10 @@
 #
 # Examples:
 #   # Review — single task file (reviewers are read-only)
-#   .opencode/tools/assemble-task.sh -a code-reviewer -t review -n s1-reviewer --task tmp/task.txt
+#   .opencode/tools/assemble-task.sh -a code-reviewer -t review -n review-auth --task tmp/task.txt
 #
 #   # Code implementation — writes directly to original files
-#   .opencode/tools/assemble-task.sh -a python-pro -t code -n s1-impl --task tmp/s1-impl-task.txt
+#   .opencode/tools/assemble-task.sh -a python-pro -t code -n impl-db --task tmp/impl-db-task.txt
 
 set -euo pipefail
 
@@ -149,9 +149,9 @@ mkdir -p "$OUT_DIR"
   printf 'All reports and output files go to: %s/tmp/\n' "$REPO_ROOT"
   printf '%s\n\n' 'The PROJECT directory (below) is for READING source files — do NOT write reports there.'
   printf '%s\n\n' '--- TASK ASSIGNMENT ---'
-  # Substitute {NAME}, then strip standalone report-file paths the lead wrote
+  # Substitute {NAME}, then strip standalone report-file paths written by the main model
   # (only lines that are sole report paths — prose references like
-  # "See s1-reviewer-report.md for context" are preserved).
+  # "See review-auth-report.md for context" are preserved).
   # Resolve relative tmp/ references to absolute. Idempotent: protect any
   # pre-existing ${REPO_ROOT}/tmp/ so absolute paths are never double-prefixed.
   # The word-boundary equivalent (^|[^[:alnum:]_]) is pure POSIX ERE — it
@@ -168,7 +168,7 @@ mkdir -p "$OUT_DIR"
   # file's WRITABLE FILES section may be writable.
   printf '%s\n' '--- WRITABLE FILES (automatic) ---'
   printf 'You must write your report to EXACTLY `%s/tmp/%s-report.md`.\n' "$REPO_ROOT" "$NAME"
-  printf '%s\n' '(This is your orchestrator working directory. NOT the PROJECT directory.)'
+  printf '%s\n' '(This is your working directory. NOT the PROJECT directory.)'
   case "$TYPE" in
     review|research)
       printf 'All source files are READ-ONLY — do NOT modify them.\n'

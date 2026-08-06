@@ -122,7 +122,7 @@ npx eslint . --fix
 
 - Code needs refactoring → use `refactor-cleaner`
 - Architecture changes needed → use `backend-architect`
-- New features required → use `agentic-planner`
+- New features required → use `planner`
 - Tests failing → use `tdd-guide`
 - Security issues → use `security-reviewer`
 

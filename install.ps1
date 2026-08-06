@@ -1,7 +1,7 @@
 # ============================================================================
-# OpenCode Workflow Installer for Windows
+# OpenCode Single-Session Agent Suite Installer for Windows
 #
-# Installs the OpenCode Workflow system into a target project.
+# Installs the OpenCode Single-Session Agent Suite into a target project.
 # Requires OpenCode CLI (https://opencode.ai) to be installed and in PATH.
 #
 # Usage:
@@ -45,7 +45,7 @@ function Write-Step {
 
 function Show-Help {
     @"
-OpenCode Workflow Installer for Windows
+OpenCode Single-Session Agent Suite Installer for Windows
 
 Installs the OpenCode Single-Session Agent Suite into a target project directory.
 
@@ -61,7 +61,7 @@ What it does:
 
 After installation:
   - Open your project with OpenCode
-  - Give it tasks — the model works directly, spawning specialist agents as needed
+  - Give it tasks - the model works directly, spawning specialist agents as needed
 "@
 }
 
@@ -88,12 +88,12 @@ function Main {
 
     Write-Host ""
     Write-Host "+======================================+" -ForegroundColor White
-    Write-Host "|  OpenCode Workflow Installer          |" -ForegroundColor White
+    Write-Host "|  Single-Session Agent Suite Installer|" -ForegroundColor White
     Write-Host "+======================================+" -ForegroundColor White
     Write-Host ""
     Write-Host "  Target: $Target"
 
-    # ── Step 1: Check OpenCode CLI ──
+    # -- Step 1: Check OpenCode CLI --
     Write-Step "Checking OpenCode CLI"
 
     $opencodeExe = Get-Command opencode -ErrorAction SilentlyContinue
@@ -112,7 +112,7 @@ function Main {
         Write-Warn "Continuing without OpenCode - agents will not spawn"
     }
 
-    # ── Step 2: Copy .opencode\ ──
+    # -- Step 2: Copy .opencode\ --
     Write-Step "Installing .opencode\ directory"
 
     $opencodeDir = Join-Path $Target ".opencode"
@@ -140,7 +140,7 @@ function Main {
         Write-Info "Installed .opencode\ directory"
     }
 
-    # ── Step 3: AGENTS.md ──
+    # -- Step 3: AGENTS.md --
     Write-Step "Setting up AGENTS.md"
 
     $agentsMd = Join-Path $Target "AGENTS.md"
@@ -160,7 +160,7 @@ function Main {
         Write-Info "Created AGENTS.md with single-session workflow instructions"
     }
 
-    # ── Step 4: tmp\ directory ──
+    # -- Step 4: tmp\ directory --
     Write-Step "Creating tmp\ directory"
     $tmpDir = Join-Path $Target "tmp"
     if (-not (Test-Path $tmpDir)) {
@@ -168,8 +168,8 @@ function Main {
     }
     Write-Info "Created tmp\ for agent working files"
 
-    # ── Done ──
-    $agentCount = (Get-ChildItem (Join-Path $opencodeDir "agents\*.md")).Count
+    # -- Done --
+    $agentCount = (Get-ChildItem (Join-Path $opencodeDir "agents\*.md") | Where-Object { $_.Name -ne "INDEX.md" }).Count
 
     Write-Host ""
     Write-Host "+======================================+" -ForegroundColor Green
@@ -188,7 +188,7 @@ function Main {
     Write-Host "  Usage:" -ForegroundColor White
     Write-Host "    cd $Target"
     Write-Host "    opencode"
-    Write-Host "    # Give it any task — the workflow activates automatically"
+    Write-Host "    # Give it any task - the suite activates automatically"
     Write-Host ""
 }
 

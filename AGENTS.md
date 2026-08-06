@@ -1,11 +1,5 @@
 # Project-Specific — single-session-opencode
 
-## Skills (Workflows)
-
-Workflows are available as skills in `.opencode/skills/` directory. Use `/skill-name` to invoke. Skills are utility operations invoked by the model as needed.
-
----
-
 ## Temporary Files
 
 You can use the `tmp/` subfolder in the current project folder to save any temporary files if needed.
@@ -17,9 +11,9 @@ This is useful for storing intermediate results, reports, or data during multi-s
 
 ## Agents
 
-114 specialized AI agents for OpenCode. Agents are stored in `.opencode/agents/` as Markdown files with YAML frontmatter.
+109 specialized AI agents for OpenCode. Agents are stored in `.opencode/agents/` as Markdown files with YAML frontmatter.
 
-**Discovery:** Do FULL read of `.opencode/agents/INDEX.md` for the full categorized agent directory (114 agents grouped by domain). Pick the MOST specialized agent — domain-specific checklists and anti-patterns only work when the agent matches the domain.
+**Discovery:** Do FULL read of `.opencode/agents/INDEX.md` for the full categorized agent directory (109 agents grouped by domain). Pick the MOST specialized agent — domain-specific checklists and anti-patterns only work when the agent matches the domain.
 
 ### Agent Categories
 
@@ -36,7 +30,7 @@ This is useful for storing intermediate results, reports, or data during multi-s
 | Frontend & Mobile | 5 | frontend-developer, ios-pro, ui-designer |
 | Documentation | 7 | documentation-pro, technical-writer, docs-architect |
 | Incident & Troubleshooting | 4 | incident-responder, debugger, devops-troubleshooter |
-| Specialized | 22 | build-engineer, cli-developer, product-manager, web-searcher, etc. |
+| Specialized | 20 | build-engineer, cli-developer, product-manager, web-searcher, etc. |
 
 ### Agent Selection
 
@@ -46,7 +40,7 @@ Most specialized wins (e.g., postgres-pro over database-optimizer). Split hybrid
 
 ## Memory System
 
-**NEVER use MEMORY.md for anything.** MEMORY.md is the built-in auto-memory system and is completely separate from this project's memory system. Do not read, write, or reference MEMORY.md. Use only `knowledge.md` and `session.md` via the `memory.sh` tool.
+**NEVER use MEMORY.md for anything.** MEMORY.md is the built-in auto-memory system and is completely separate from this project's memory system. Do not read, write, or reference MEMORY.md. Use only `knowledge.md` and `session.md` via the `memory.sh` tool (or `memory.bat` on Windows).
 
 Two-tier: **Knowledge** (`knowledge.md`) permanent, **Session** (`session.md`) temporary.
 
@@ -60,7 +54,7 @@ Two-tier: **Knowledge** (`knowledge.md`) permanent, **Session** (`session.md`) t
 ### Knowledge
 
 ```bash
-./.opencode/tools/memory.sh add <category> "<content>" [--tags a,b,c]
+./.opencode/tools/memory.sh add <category> "<content>" [--tags a,b,c]   # memory.bat on Windows
 ```
 
 | Category | Save When |
@@ -124,48 +118,81 @@ Multiple CLI instances work without conflicts. Resolution: `-S` flag > `MEMORY_S
 
 **Deep research:** For large multi-query research tasks, the model may delegate to the `web-searcher` agent (`.opencode/agents/web-searcher.md`) via the task tool — it is designed for comprehensive search + fetch + report. The model decides when direct `web_search.sh` calls suffice vs. when the agent is warranted.
 
-Synthesize results into a report or answer. **Note:** Always use forward slashes (`/`) in paths for agent tool run, even on Windows. Dependencies handled automatically via uv.
+### Research Confidence Tiers
+
+When presenting research findings, always state their confidence tier. Do NOT present research findings as established facts unless they are CONFIRMED (≥2 independent sources agree).
+
+- **CONFIRMED** — ≥2 independent sources agree on the fact
+- **LIKELY** — one solid source, or multiple weaker ones consistent
+- **TENTATIVE** — single source, plausibility uncertain
+- **SPECULATIVE** — inference beyond the sources; clearly label as such
+
+State the tier explicitly in your answer for each key research claim (e.g., "CONFIRMED: …", "LIKELY: …"). This is especially important when research conflicts with the user's assumptions or when the information will drive code changes.
+
+**Note:** Always use forward slashes (`/`) in paths for agent tool run, even on Windows. Dependencies handled automatically via uv.
 
 ---
 
-## Autonomy
+## Interaction Model — a dialog with the user
 
-The model runs tasks to completion without unnecessary stops. The operator is present in the session and may interject, redirect, or ask questions at any time — the model responds immediately. But the model does not pause its own progress waiting for decisions it can make itself.
+This suite is a **dialog**, not an autonomous pipeline. The model solves the task at hand; the user is the partner in the session. The user can — and will — interject, redirect, ask questions, and change course at any moment.
 
 **MANDATORY:**
-- The operator interjects freely — when they do, respond immediately and adjust course. The operator is an active participant, not a reviewer at the end of a pipeline.
-- Do NOT pause work or ask for approval to proceed when the path is clear. Ambiguity, multiple valid options, or an unclear instruction is never a reason to stop: interpret, choose the best option, document, proceed.
-- Do not ask "should I continue?" or wait for confirmation between steps — keep working unless the operator redirects.
-- Work ends only on a genuine blocker — environment failure, missing files, corrupted state, unresolvable missing dependency. Report the blocker and what remains.
-- Any rule elsewhere (AGENTS.md, agent `.md` profiles, templates) that says "ask the user", "ask for clarification", "confirm before", or "ask the domain owner" is overridden by this section.
+- **Plan before non-trivial work.** Before starting a multi-step task, tell the user your plan/approach in a few lines — what you'll do, in what order, and any assumptions or open choices. After the user acknowledges (or interjects), proceed.
+- **Surface decisions.** Whenever a genuine fork in the road appears (different approaches with real trade-offs, ambiguous requirements, scope questions), present the options briefly with a recommendation — then proceed with your best judgment if the user does not pick.
+- **Keep the user in the loop.** Report meaningful progress, findings, and course changes as they happen. A short line is enough; do not silently disappear into a long operation.
+- **Respond to interjections immediately.** The user's message always takes priority over the current step. Adjust course on the spot.
+- **Don't pause for approval of obvious steps.** Planning, research, and execution that are clearly implied by the task proceed without asking. The dialog is about direction and decisions, not permission for every action.
+- **Never ask "should I continue?"** — continue, and report.
+- **Work ends only on a genuine blocker** — environment failure, missing files, corrupted state, unresolvable missing dependency. Report the blocker and what remains.
+
+**Scope — main model only.** This dialog model applies to the MAIN model in the session. Subagents are different: they are fully autonomous workers that never talk to the user. A subagent executes its one task, makes its own decisions, and reports back to the main model — which then relays results to the user. The subagent coordination templates (`.opencode/templates/coordination-*.txt`) keep their own autonomy rules; they are intentionally NOT overridden by this section.
 
 ---
 
 ## Single-Session Workflow
 
-This is a single-session agent suite — NOT an orchestration pipeline. The model does the work itself, in the current session, with the operator watching. Subagents are a tool the model uses at its own discretion, never a mandated pipeline.
+This is a single-session agent suite — NOT an orchestration pipeline. The model does the work itself, in the current session, in dialog with the user. Subagents are a tool the model uses at its own discretion, never a mandated pipeline.
 
 ### How it works
 
 1. **The model does the work directly.** The main model is the sole worker. It reads code, writes code, runs commands, verifies results, and delivers — all in the current session.
-2. **The model decides when to spawn a subagent.** There is no planner, no manifest, no verification pipeline, no stage structure. The model evaluates each piece of work itself: if a subtask would benefit from a specialist's dedicated context (large independent module, unfamiliar domain, complex analysis, focused review), the model spawns a subagent. Otherwise it does the work directly.
-3. **The operator works alongside the model.** The operator can interject, redirect, ask questions, or assign new tasks at any point mid-session. The model responds immediately — there is no "stage boundary" to respect.
-4. **Tasks are single-session sized.** This suite is for focused, self-contained tasks the model can complete in one session with the operator. It is not for orchestrator-level multi-stage productions.
+2. **The model solves most work directly.** Subagents are the exception, not the default: the model spawns one only when a serious subtask genuinely benefits from a specialist's domain expertise or isolated context — and it makes that call itself, on sight. There is no planner, no manifest, no stage structure.
+3. **The user works alongside the model.** The user interjects, redirects, asks questions, or assigns new tasks at any point mid-session. The model responds immediately — there is no "stage boundary" to respect.
+4. **Tasks are single-session sized.** This suite is for focused, self-contained tasks the model can complete in one session with the user. It is not for orchestrator-level multi-stage productions.
+
+### Plan display rule
+
+Before starting any non-trivial task, output your plan as text to the user — steps, order, approach, assumptions, open choices. Write it in the session, not just to a file. Display first, then proceed. For trivial tasks (a one-liner fix, a quick answer), skip the formal plan — a short statement of intent suffices.
 
 ### When to spawn a subagent
 
-The model uses its judgment. Spawn when ANY of these match:
+**Default: do the work directly.** The model solves simple and medium tasks itself. Subagents are for serious tasks only — spawn one when the task is genuinely hard AND delegation makes it materially better.
 
+**Spawn ONLY when ALL of these hold:**
+1. **The task is serious.** A deep security audit, a large refactor, a complex cross-module analysis, an unfamiliar domain, a non-trivial implementation (a real feature, module, or subsystem — not a one-liner fix, not a routine edit, not a question the model can answer directly).
+2. **A specialist makes it materially better.** The subagent's domain checklists and anti-patterns produce a result the model would not reach alone (e.g., an idiomatic Rust refactor via `rust-pro`, a query optimization via `postgres-pro`, a security review via `security-reviewer`, a real implementation via the matching language specialist).
+3. **Context protection matters.** The subtask would fill a meaningful part of the model's context with reading/analysis that the subagent can absorb in its own isolated session, returning only a compact result (report + findings).
+
+Spawn when ANY of these match:
 - A subtask spans a domain the model would do better with a specialist's checklist (e.g., a deep security review, a complex SQL schema, an idiomatic Rust refactor)
-- A subtask is large and independent — parallel subagents can work concurrently on disjoint areas while the model continues elsewhere
+- A subtask is large and independent — the subagent holds the full scope in its own context while the model continues the main work
+- **Serious implementation work** — building a real feature, module, or subsystem; complex algorithmic code; a substantial component in a language the model should delegate to the matching specialist (e.g., `python-pro`, `typescript-pro`, `golang-pro`, `swift-pro`). The specialist writes it idiomatic and correct; the model reviews and integrates
 - A subtask benefits from isolation (audits, reviews, research) so the model's current context doesn't bias it
 - The model needs a second opinion or an independent check of its own work
 
-Do NOT spawn when the work is simple, well-understood, or would take more coordination than doing it directly. Prefer doing the work directly by default.
+**Do NOT spawn when:**
+- The work is simple, well-understood, or would take more coordination than doing it directly
+- The model can produce a correct result itself without excessive context use — delegation adds overhead, not quality
+- The only benefit would be perceived parallelism or "using the machinery" — there is no quota and no obligation to spawn
+
+**Mandatory exceptions (always used, not optional):**
+- **Web research** — ANY external information need goes through `web_search.sh` first (see Web Research section). Research is the standing exception to "solve it yourself": the model does not guess facts it can verify online.
+- **Adversarial check** — after high-priority/high-risk work, `adversarial-reviewer` MUST verify the result (see Quality Practices).
 
 ### How to spawn
 
-All 114 agents are native opencode subagents, auto-loaded from `.opencode/agents/*.md`:
+All 109 agents are native opencode subagents, auto-loaded from `.opencode/agents/*.md`:
 
 1. Read the agent's `.md` file — always fresh re-read before delegating
 2. Assemble a task prompt with `assemble-task.sh`:
@@ -181,14 +208,65 @@ All 114 agents are native opencode subagents, auto-loaded from `.opencode/agents
 
 **Task file contents:** PROJECT, YOUR TASK (KEY FILES, CONTEXT, SCOPE), MUST ANSWER questions. Write `tmp/{NAME}-task.txt`, then assemble. Code agents get a WRITABLE FILES section listing exactly which source files they may modify.
 
-**Parallel spawns:** For independent subtasks, issue multiple `task` calls in ONE message — all run concurrently. Keep parallel batches reasonable (up to ~5); coordination overhead grows with count.
+**Task prompt self-sufficiency (MANDATORY):** All per-task context must live in the task prompt — key files, scope, constraints, questions. Do NOT rely on AGENTS.md or the agent's `.md` as the operating manual for task specifics. The agent gets a self-contained assignment.
+
+**Parallel spawns:** Only when several genuinely independent serious subtasks exist — issue multiple `task` calls in ONE message so they run concurrently. Keep parallel batches reasonable (up to ~5); coordination overhead grows with count.
+
+**Spawn discipline:**
+- **One task per agent.** A subagent executes exactly one task and writes one report. No chained multi-task agents.
+- **No two agents edit the same file in parallel** (read overlap is fine). If parallel work needs the same file, split by content or sequence the agents.
+- **Respawn discipline:** if an agent fails or produces wrong output, diagnose the root cause (bad prompt? wrong agent? environment?), fix it, and re-issue. Maximum 3 respawn attempts per agent (name them `-r2`, `-r3`). After 3 failures, stop and either do the work yourself or discuss the approach with the user.
 
 ### Reviewing agent output
 
 - Check the report exists and is non-empty — that's the primary gate
 - Read the report's findings and apply them to the main task
-- If an agent's output is wrong or incomplete: diagnose (bad prompt? wrong agent?), fix the task, and re-spawn with corrections
-- There is no mandated verification pipeline, no second opinions, no adversarial stages — the model reviews agent output with its own judgment, as it would its own work
+- If an agent's output is wrong or incomplete: diagnose (bad prompt? wrong agent?), fix the task, and re-spawn with corrections (see spawn discipline above)
+- There is no mandated verification pipeline, no second opinions, no stage structure — the model reviews agent output with its own judgment, as it would its own work. The one exception is the adversarial gate for high-priority work (see Quality Practices below).
+
+---
+
+## Quality Practices
+
+### Verify before claiming (grep first)
+
+Before claiming something is missing, broken, or unimplemented — grep for existing guards, handlers, or implementations first. Search the codebase for the thing you think is absent before reporting it absent. A claim like "there is no validation here" requires a search that confirms it.
+
+### Self-review after non-trivial code
+
+After writing or modifying non-trivial code: re-read your own diff, run the available tests/build/lint, and check edge cases before delivering. Present the result as reviewed, with test results stated. For significant or security-sensitive changes, consider spawning `code-reviewer` for an independent pass.
+
+### Adversarial check for high-priority work
+
+For very important, high-priority, or high-risk work (production-critical changes, security-sensitive code, irreversible operations, large refactors), the model MUST use the `adversarial-reviewer` agent to check the results for errors before delivering. The adversarial reviewer tries to FALSIFY the work: it reads the code with full surrounding context, searches exhaustively for counter-evidence, errors, and missed edge cases, and reports what survives as CONFIRMED issues.
+
+How to use it:
+- After the work is complete (code written or changes made), spawn `adversarial-reviewer` with a task that describes what was done and asks it to hunt for errors, regressions, and unhandled edge cases in the result
+- Include KEY FILES (the files that were changed), CONTEXT, and MUST ANSWER questions like: "Are there any bugs, edge cases, or regressions in this change? Is the change correct in all call paths?"
+- Treat its CONFIRMED findings as real issues — fix them (directly or via another subagent), then re-verify
+- This is a quality gate for high-stakes work only — do not use it for routine changes where self-review and tests suffice
+
+### Don't redo work without evidence
+
+Never redo work that was already done correctly unless evidence shows it was wrong. If a previous attempt exists, inspect why it failed or was incomplete before replacing it — don't rebuild from scratch out of habit.
+
+### Reporting severity
+
+When reporting problems or findings to the user, rate their severity so the user can prioritize:
+
+| Level | Criteria |
+|-------|----------|
+| **None** | No functional impact. Comment, formatting, variable rename. |
+| **Low** | Minor, immediately reversible. Dev tooling, internal logging, tests. |
+| **Medium** | User-facing, visible but contained. |
+| **High** | Core product function, data mutation, wide blast radius. |
+| **Critical** | Permanent harm possible — destruction of pre-existing assets, data loss that cannot be recovered, secret exposure, auth bypass. |
+
+Label findings with their severity (e.g., "HIGH: …") when reporting more than one issue or when anything is at MEDIUM+.
+
+### Regression awareness (git-aware notes)
+
+When working on a codebase with git history: before assuming a problem is new, check whether the cited lines were touched by prior fix/audit commits (`git log --all --format="%h %s" | grep -i "production\|check\|fix\|audit"`). If the location was previously fixed and the issue is back, flag it as a repeat-regression — the previous fix was incomplete, and this one needs extra care (verify the root cause, not just the symptom).
 
 ---
 
@@ -198,13 +276,13 @@ All 114 agents are native opencode subagents, auto-loaded from `.opencode/agents
 |----------|--------|
 | No report after exit | Diagnose failure from the task result / missing report. Fix root cause (bad prompt? missing dependency? environment?). Re-issue the task call. |
 | Agent claims success but output wrong | Diagnose why (bad prompt? misunderstood task?). Fix the prompt/task. Re-issue. |
-| Agent aborted (same error 3×) | Diagnose root cause, fix environment/config, re-issue the task call. |
+| Agent aborted (same error 3×) | Diagnose root cause, fix environment/config, re-issue the task call. If it fails a 4th time, do the work directly or discuss with the user. |
 | 2+ agents fail same env error | STOP respawning. Diagnose environment first. |
 
 ---
 
 ## Delivery
 
-- Write final results to the operator in the session — summaries, reports, files changed
+- Write final results to the user in the session — summaries, reports, files changed, severity-labeled findings
 - Clean up temporary task files: `rm -f tmp/*-task-prompt.txt tmp/*-task.txt` (keep reports, logs, memory)
 - Save non-trivial discoveries to knowledge (`memory.sh add`) and task state to session (`memory.sh session add`)

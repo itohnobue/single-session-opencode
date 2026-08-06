@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # ============================================================================
-# OpenCode Workflow Installer
+# OpenCode Single-Session Agent Suite Installer
 #
-# Installs the OpenCode Workflow system into a target project.
+# Installs the OpenCode Single-Session Agent Suite into a target project.
 # Requires OpenCode CLI (https://opencode.ai) to be installed and in PATH.
 #
 # Usage:
@@ -33,7 +33,7 @@ step()  { printf '\n%s==>%s %s%s%s\n' "$CYAN" "$RESET" "$BOLD" "$*" "$RESET"; }
 
 show_help() {
   cat <<'HELP'
-OpenCode Workflow Installer
+OpenCode Single-Session Agent Suite Installer
 
 Installs the OpenCode Single-Session Agent Suite into a target project directory.
 
@@ -76,7 +76,7 @@ main() {
   target="$(cd "$target" && pwd -P)"
 
   printf '\n%s╔══════════════════════════════════════╗%s\n' "$BOLD" "$RESET"
-  printf '%s║     OpenCode Workflow Installer       ║%s\n' "$BOLD" "$RESET"
+  printf '%s║     Single-Session Agent Suite         ║%s\n' "$BOLD" "$RESET"
   printf '%s╚══════════════════════════════════════╝%s\n\n' "$BOLD" "$RESET"
 
   printf '  Target: %s\n' "$target"
@@ -134,7 +134,8 @@ main() {
     if grep -q "OpenCode" "$target/AGENTS.md" 2>/dev/null; then
       info "AGENTS.md already exists with workflow instructions"
     else
-      warn "AGENTS.md exists but doesn't have workflow instructions"      printf '  You can append them manually:\n'
+      warn "AGENTS.md exists but doesn't have workflow instructions"
+      printf '  You can append them manually:\n'
       printf '    cat %s/AGENTS.md >> %s/AGENTS.md\n\n' "$SCRIPT_DIR" "$target"
     fi
   else
@@ -156,8 +157,8 @@ main() {
   printf '  Installed to: %s\n' "$target"
   printf '\n'
   printf '  %sContents:%s\n' "$BOLD" "$RESET"
-  printf '    .opencode/agents/     %s agent definitions\n' "$(find "$target/.opencode/agents" -name '*.md' 2>/dev/null | wc -l | tr -d ' ')"
-    printf '    .opencode/tools/      Research & memory tools\n'
+  printf '    .opencode/agents/     %s agent definitions\n' "$(find "$target/.opencode/agents" -name '*.md' ! -name 'INDEX.md' 2>/dev/null | wc -l | tr -d ' ')"
+  printf '    .opencode/tools/      Research & memory tools\n'
   printf '    .opencode/templates/  Agent prompt boilerplate\n'
   printf '    AGENTS.md             Single-session workflow instructions\n'
   printf '    tmp/                  Agent working directory\n'
@@ -165,7 +166,7 @@ main() {
   printf '  %sUsage:%s\n' "$BOLD" "$RESET"
   printf '    cd %s\n' "$target"
   printf '    opencode\n'
-    printf '    # Give it any task — the workflow activates automatically\n'
+  printf '    # Give it any task — the suite activates automatically\n'
   printf '\n'
 }
 

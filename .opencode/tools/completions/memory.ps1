@@ -1,7 +1,8 @@
 # PowerShell completion for memory.bat
 # Add to your PowerShell profile: . path\to\memory.ps1
 
-$script:memoryCommands = @('add', 'search', 'context', 'list', 'rebuild', 'delete', 'stats', 'maintain')
+$script:memoryCommands = @('add', 'search', 'context', 'list', 'delete', 'stats', 'session')
+$script:sessionSubcommands = @('add', 'list', 'show', 'update', 'delete', 'clear', 'archive', 'use', 'current', 'sessions', 'list-all', 'show-all')
 $script:memoryCategories = @('architecture', 'discovery', 'pattern', 'gotcha', 'config', 'entity', 'decision', 'todo', 'reference', 'context')
 
 Register-ArgumentCompleter -Native -CommandName memory.bat, memory.sh -ScriptBlock {
@@ -27,6 +28,24 @@ Register-ArgumentCompleter -Native -CommandName memory.bat, memory.sh -ScriptBlo
         return
     }
 
+    # Session subcommand
+    if ($command -eq 'session') {
+        $sessionCmd = $null
+        for ($i = 2; $i -lt $tokens.Count; $i++) {
+            $token = $tokens[$i].Extent.Text
+            if ($token -notlike '-*' -and $token -in $script:sessionSubcommands) {
+                $sessionCmd = $token
+                break
+            }
+        }
+        if (-not $sessionCmd) {
+            $script:sessionSubcommands | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
+                [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)
+            }
+            return
+        }
+    }
+
     # Command-specific completions
     switch ($command) {
         'add' {
@@ -41,12 +60,6 @@ Register-ArgumentCompleter -Native -CommandName memory.bat, memory.sh -ScriptBlo
         'list' {
             # Suggest options
             @('-c', '--category', '-l', '--limit', '-o', '--output') | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
-                [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterName', $_)
-            }
-        }
-        'maintain' {
-            # Suggest maintain options
-            @('--max-age', '--execute', '-o', '--output') | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
                 [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterName', $_)
             }
         }
@@ -67,6 +80,11 @@ Register-ArgumentCompleter -Native -CommandName memory.bat, memory.sh -ScriptBlo
         }
         { $_ -in '-l', '--limit' } {
             @('5', '10', '20', '50', '100') | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
+                [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)
+            }
+        }
+        { $_ -in '-s', '--status' } {
+            @('pending', 'in_progress', 'completed', 'blocked') | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
                 [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)
             }
         }

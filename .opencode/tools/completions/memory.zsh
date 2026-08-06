@@ -5,17 +5,31 @@
 # fpath=(~/.zsh/completions $fpath)
 
 _memory() {
-    local -a commands categories
+    local -a commands categories session_subcommands
 
     commands=(
         'add:Add a new memory'
         'search:Search memories (ranked by relevance + recency)'
         'context:Get context block for a topic'
         'list:List all memories'
-        'rebuild:Force rebuild index'
         'delete:Delete a memory'
         'stats:Show statistics'
-        'maintain:Check database health and clean old memories'
+        'session:Session memory commands'
+    )
+
+    session_subcommands=(
+        'add:Add session entry'
+        'list:List session entries'
+        'show:Show session state'
+        'update:Update entry status'
+        'delete:Delete session entry'
+        'clear:Clear current session'
+        'archive:Move to knowledge'
+        'use:Switch to session'
+        'current:Show current session info'
+        'sessions:List all sessions'
+        'list-all:List entries from all sessions'
+        'show-all:Show state of all sessions'
     )
 
     categories=(
@@ -40,9 +54,9 @@ _memory() {
         '(-t --tags)'{-t,--tags}'[Comma-separated tags]:tags:' \
         '(-l --limit)'{-l,--limit}'[Limit results]:limit:(5 10 20 50 100)' \
         '(-c --category)'{-c,--category}'[Filter by category]:category:(${categories%%:*})' \
-        '(-o --output)'{-o,--output}'[Output format]:format:(text json)' \
-        '--max-age[Max age in days for maintain]:days:' \
-        '--execute[Actually delete old memories]'
+        '(-s --status)'{-s,--status}'[Filter/set status]:status:(pending in_progress completed blocked)' \
+        '(-S --session)'{-S,--session}'[Session name]:session:' \
+        '(-o --output)'{-o,--output}'[Output format]:format:(text json)'
 
     case $state in
         command)
@@ -66,11 +80,15 @@ _memory() {
                 delete)
                     _message 'memory ID'
                     ;;
-                maintain)
-                    _arguments \
-                        '--max-age[Max age in days]:days:' \
-                        '--execute[Actually delete old memories]' \
-                        '(-o --output)'{-o,--output}'[Output format]:format:(text json)'
+                session)
+                    if (( CURRENT == 2 )); then
+                        _describe -t session_subcommands 'session subcommand' session_subcommands
+                    else
+                        case $words[2] in
+                            add)   _message 'category content' ;;
+                            list|show|update|delete|clear|archive|use|current|sessions|list-all|show-all) _message 'options' ;;
+                        esac
+                    fi
                     ;;
             esac
             ;;

@@ -1,10 +1,10 @@
-# Agent Directory (113 agents)
+# Agent Directory (109 agents)
 
 Quick reference for agent selection. Pick the MOST specialized agent for the task — domain-specific checklists and anti-patterns only work when the agent matches the domain.
 
 ## Mode Tags (Recommendation — Not a Strict Rule)
 
-Each agent has a **Mode** tag based on real-project A/B/C testing (108 agents tested on real codebases). The tag indicates which cognitive approach the agent is best at. **This is a recommendation to consider alongside specialization, not a restriction** — any agent can do any task, but matching the mode to the task type produces measurably better results.
+Each agent has a **Mode** tag based on real-project A/B/C testing on real codebases. The tag indicates which cognitive approach the agent is best at. **This is a recommendation to consider alongside specialization, not a restriction** — any agent can do any task, but matching the mode to the task type produces measurably better results.
 
 **How to use:** First, pick the most specialized agent for the domain (e.g., `postgres-pro` for PostgreSQL). Then consider whether the mode fits the task:
 
@@ -163,6 +163,7 @@ When in doubt, specialization always wins over mode. A `TRACE` security-reviewer
 |------|-------|------|----------|
 | build-engineer.md | Build engineer | SWEEP | webpack, Vite, esbuild, build optimization |
 | build-error-resolver.md | Build error fixer | TRACE | Build/TypeScript errors, minimal fixes |
+| adversarial-reviewer.md | Adversarial reviewer | TRACE | Falsifies findings against source — checks results for errors on high-priority work |
 | cli-developer.md | CLI developer | TRACE | Command-line tools, argument parsing |
 | data-engineer.md | Data engineer | KNOW | ETL/ELT, Spark, Airflow, Kafka |
 | data-scientist.md | Data scientist | SWEEP | Statistical analysis, pandas, scikit-learn |
@@ -171,9 +172,6 @@ When in doubt, specialization always wins over mode. A `TRACE` security-reviewer
 | dotnet-core-pro.md | .NET Core expert | KNOW | .NET 8, minimal APIs, cloud-native |
 | dotnet-framework-pro.md | .NET Framework expert | KNOW | .NET 4.8, Web Forms, WCF, legacy |
 | dx-optimizer.md | DX optimizer | KNOW | Developer experience, tooling, workflows |
-| adversarial-reviewer.md | Adversarial reviewer | Falsifies audit/discovery findings against source code using exhaustive adversarial scrutiny. Labels findings CONFIRMED/REJECTED/WEAKENED per unified verification vocabulary. |
-| agentic-planner.md | Agentic planner | Researches project structure and agent availability, produces custom Orchestration Workflow plans by selecting from the dynamic brick catalog. Runs on default opencode model. |
-| volume-splitter.md | Volume splitter | Resolves FILE SCOPES to exact KEY FILES with wc -l counts, applies mechanical split/merge rules, rewrites the plan in-place. Runs between planner and organizer in Stage 0. |
 | full-stack-developer.md | Full-stack developer | SWEEP | End-to-end features, database to UI |
 | legacy-modernizer.md | Legacy modernizer | TRACE | Incremental modernization, monolith decomposition |
 | performance-engineer.md | Performance engineer | TRACE | Bottleneck identification, scaling strategy |
@@ -181,7 +179,5 @@ When in doubt, specialization always wins over mode. A `TRACE` security-reviewer
 | product-manager.md | Product manager | SWEEP | Product vision, strategy, roadmaps |
 | refactor-cleaner.md | Refactor/cleanup | KNOW | Dead code removal, consolidation |
 | research-analyst.md | Research analyst | KNOW | Structured research, source evaluation |
-| verification-analyst.md | Verification analyst | Workflow-internal: extraction + synthesis for the verification pipeline (dedupe findings, classify severity, batch adversarial review, compile verdict grids) and knowledge harvesting. Pinned reasoningEffort: high. |
 | websocket-engineer.md | WebSocket engineer | SWEEP | Real-time messaging, Socket.IO |
 | web-searcher.md | Web researcher | SWEEP | Internet search + synthesis |
-| agent-organizer.md | Agent orchestrator | Multi-agent task delegation |
