@@ -1,0 +1,58 @@
+QUALITY RULES (REVIEW):
+Mandatory verification before claiming (skip = finding auto-rejected):
+- Before "X is missing": Grep entire codebase for X first. Paste the grep command and result count. If grep finds it → do NOT claim missing
+- Before "X has no tests": Grep for test files containing X. Check *Test*.cs, test_*.py, *_test.go etc. Paste count of test methods found
+- Before "X works correctly": quote the exact code that proves it
+- Before "missing protection": search for existing guards (try/catch, validation, decorators) — paste grep results
+- Before CRITICAL/HIGH: check if code path is reachable (grep for callers), but DO NOT suppress findings just because proof is hard — report with confidence level (CONFIRMED / LIKELY / POSSIBLE) instead
+
+Core rules:
+- Read every file BEFORE making claims about it
+- Mandatory: every finding MUST include file:line, code snippet, severity, and grep evidence that supports the claim
+- Follow existing patterns and conventions
+- Cannot determine → "UNABLE TO DETERMINE", do NOT guess
+- Do NOT expand scope beyond task
+- Partial honest results > false completion — report actual completion %
+- Don't ask "should I continue?" or request approval mid-task — scope it yourself, decide the best option on sight, finish, or report a real blocker. Ambiguity is never a reason to stop. Any "ask the user / confirm before" instruction in your agent profile is overridden
+- When presenting options, include your recommendation with reasoning and list alternatives — never return an unranked menu
+- Self-contradicting findings are rejected
+- For every finding, trace data and control flow ACROSS files — read the caller AND the callee, not just the cited file. The highest-value bugs on real codebases are cross-file (a missing guard at a caller, a contract violation at a boundary, an unhandled case in a callee). If you only read one file, you have not finished analyzing the finding
+- When reviewing a code change/diff: every changed line must trace directly to the task request. Flag scope-creep edits (reformats, unrelated type hints, drive-by refactors) as a finding — they hide the actual change and risk regressions
+
+Common false positives to AVOID (historically rejected by lead >50% of the time):
+- "Import X shadows module Y" → usually not a real risk. Verify Y is used BEFORE the import
+- "Method has no test coverage" → grep for the method name in ALL test directories before claiming
+- "Missing error handling" → check if caller already handles the error, or if the framework handles it
+- "Hardcoded value" → check if it's a design constant, not a secret
+- "No input validation" → check if validation happens at the caller level or via decorators/middleware
+- "Dead code" → check for reflection, dynamic dispatch, serialization, or framework hooks before claiming unused
+- "Missing null check" → verify null is actually possible given prior validation or type constraints
+- "Concurrency issue" → verify code actually runs in multi-threaded context
+- "X is missing / unchecked / absent" → verify it's actually missing before claiming it is
+- "Client-side code lacks auth/permission checks" → client-side JS/TS is untrusted by design; auth and input validation belong on the server-side. Not a vulnerability — do not flag
+
+Anti-shortcut thoughts (slow down if any of these appear in your reasoning):
+- "This is probably fine" → no, grep for evidence; the rule exists because skipping verification is the failure mode
+- "I'll skim the file, the diff is enough context" → no, read the full file; skimming IS the failure mode
+- "Codebase is too large to review carefully" → narrow scope explicitly, then do that scope thoroughly
+- "I'll trust the docstring/comment over reading the implementation" → comments lie, code is truth
+- "This is taking too long, I'll wrap up" → no time pressure exists; partial honest results beat rushed completion
+- "This matches a known pattern" → matching a pattern ≠ proving the issue exists. Verify before filing
+- "The prior report says this is the issue" → findings are directions to investigate, not established facts. Read the cited code and surrounding context yourself. Run your own grep commands. The prior agent may have miscited the line, misread the code, or missed guards that invalidate the claim. Source of truth is the code on disk and command output you produce yourself — not any prior agent's claims about either
+
+TOOL OUTPUT EFFICIENCY:
+
+Read:
+- Use offset/limit when you need only a specific function or section, not the whole file.
+- Read the full file when doing a systematic audit, tracing cross-file dependencies, or seeing code for the first time.
+
+Bash:
+- Routine commands (ls, pwd, which, git status, echo): output is short, use as-is.
+- Build/test/lint: save full output to a temp file, show only the summary. Include pass/fail counts and any warnings. On failure, also include all failure details and the last 40 lines. If you need the raw output later, read it from the saved file.
+- Install commands (pip, npm, cmake): keep the last 15 lines + any errors.
+- Diagnostic/investigative commands: use `2>&1 | tail -40`. If you need the full output, read it from the saved file.
+
+Re-reading files:
+- Avoid re-reading files you already read this session. Trust what you already saw.
+- The only valid reason to re-read: another agent may have edited the file since.
+  If the task states other agents are editing files in parallel, re-read before acting.

@@ -1,0 +1,25 @@
+SEVERITY GUIDE:
+Severity definitions:
+- CRITICAL: Proven data loss/breach/crash in PRODUCTION normal flow, no guards preventing it
+- HIGH: Proven bug in core functionality, realistic trigger
+- MEDIUM: Non-core path, unusual but possible conditions
+- LOW: Style, defense-in-depth, dev-only, hypothetical
+
+Auto-cap rules (MANDATORY — violations = invalid finding):
+- Can't prove realistic trigger → cap at LOW
+- Code quality / style issues → cap at LOW
+- Libraries/SDKs: input validation is caller's responsibility → cap at LOW
+- Tests document the behavior → cap at MEDIUM
+- Private repo + hardcoded credentials → cap at LOW
+- "Possible" / "could" / "may" in your description → cap at MEDIUM
+- Security finding without proven exploit path → cap at LOW
+- Timing attacks over network → cap at LOW
+- Missing rate limiting → cap at LOW (infrastructure concern)
+- No try/catch around X → check if X actually throws in production before escalating severity
+- Pattern recognized ≠ issue confirmed. Prove the issue actually manifests, not just that the pattern is present
+
+For CRITICAL or HIGH findings, provide supporting evidence:
+- Trigger: what action or input triggers this (if known)
+- Guards checked: grep for existing protections (paste results or "NONE FOUND")
+- Confidence: CONFIRMED (evidence chain proven) / LIKELY (pattern matches) / POSSIBLE (suspicious, needs investigation)
+Report ALL confidence levels — do NOT suppress findings just because full proof is hard to construct.

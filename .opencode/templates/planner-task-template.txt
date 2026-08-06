@@ -1,0 +1,59 @@
+=== TASK (s0-planner) ===
+PROJECT: [fill in project path]
+YOUR TASK: Research this project thoroughly and produce a custom Orchestration Workflow manifest. Explore the full codebase structure, read the agent INDEX at `.opencode/agents/INDEX.md`, classify the task on 5 axes (size, domain breadth, ambiguity, severity, change type), select appropriate bricks from the palette, and write the plan to `tmp/glm-plan.md`.
+MUST ANSWER:
+1. Domain breadth: how many distinct source-code specialists (languages/frameworks) does the codebase need? Map each to the best agent from the INDEX. Do not count audit roles (test-automator, documentation-pro) — they audit the same code through different lenses, not separate domains.
+2. What is the task classification on all 5 axes, with code-context justification for each? Include the Q1-Q5 severity checklist with YES/NO per question and one-line evidence.
+3. Which bricks are selected and why? Which are skipped and why? State the CONVERGE CEILING for every DISCOVER and REVIEW stage (ONCE default / LOOP rare, justified by ambiguity, codebase complexity, severity, and production impact). There is NO NONE variant — firing is automatic and mechanical, triggered only by ≥1 CONFIRMED HIGH/CRITICAL finding (adversarially verified) in the prior iteration's VERIFY synthesis grid.
+3b. For every DISCOVER and REVIEW stage (including CONVERGE iterations of these stages): state whether second opinions are required based on severity (MEDIUM+ → mandatory). For each stage that requires a second opinion, explicitly name the second agent in the stage's plan entry — the lead spawns whatever agents the plan lists, so it must be in the plan. Use a different agent .md from the primary (see AGENTS.md Second Opinion Guidelines for default pairings). If no second opinion is required (severity < MEDIUM or LOW-only findings), justify briefly.
+4. RESEARCH: List every external reference the codebase depends on. A reference exists when the code calls a named API, uses named directives, reads/writes a named format, or cites a named algorithmic source. Count from systematic grep, not ad-hoc reads. One row per named version. One research agent per row that passes the precision criterion (verification requires external documentation the domain specialist lacks). Skip (with a one-line reason in the plan) when: (a) mechanical fix, (b) zero references found by systematic grep, (c) the reference is standard usage of a generic well-documented library the domain specialist already possesses (e.g., numpy, chardet, stdlib). Named formats/protocols/standards and algorithms always get agents — do not skip those.
+5. For each agent you plan in the DISCOVER stage, state the agent's FILE SCOPES — module-level descriptions of what the agent should audit (e.g., "GPG core: core/GPGHandler.py, core/gpg_utils/*.py"). Include a rough LOC estimate from Phase 1 for each scope. Do NOT list individual file paths — the volume-splitter resolves scopes to exact KEY FILES. Keep each agent to ~10 files / ~3,000 LOC estimated; narrow overages (up to ~15 files / ~3,500 LOC) are acceptable only when the same cohesive module requires reading all files together. Split by module or concern for anything over those estimates. If the task spans 2+ domains: (a) classify each domain boundary using the Boundary Selection tiers (ALWAYS/DEFAULT/SKIP), (b) add intersection agents to DISCOVER for ALWAYS/DEFAULT boundaries — intersection agents MUST be in the first DISCOVER stage, never deferred to CONVERGE, (c) add cross-domain integration reviewers to REVIEW for ALWAYS/DEFAULT boundaries (same-specialist ALWAYS-tier boundaries also require both intersection and cross-domain reviewers), (d) document all boundary decisions in the manifest under "Boundary Analysis."
+6. For each domain and sub-group agent, provide FILE SCOPES (module-level descriptions of what the agent covers — not individual file paths; e.g., "Mail sync module: core/sync.py, core/mail/*.py"). Include rough LOC estimates from Phase 1 research. Do NOT try to list exact file paths — the volume-splitter owns path resolution and exact LOC counts. Include 3-6 MUST ANSWER questions with expected evidence types (based on your Phase 1 code research). Include second opinion scope.
+7. What is the total agent estimate, broken down by stage?
+8. Do the build and test commands work? Run them and report results. If the project's AGENTS.md or README says not to run them locally, state that and skip. Include the verified working commands (or reason for skipping) in the plan.
+
+STOP AFTER WRITING THE PLAN. When `tmp/glm-plan.md` is written, your work is complete. Do NOT execute any stage, spawn any agents, prepare any task files for Stage 1+, copy any files, or run any verification. The plan IS your deliverable. The volume-splitter and organizer handle the rest of Stage 0. The lead handles all execution from Stage 1 onward.
+
+=== TASK (s0-volume) ===
+PROJECT: [same project path]
+PRIOR CONTEXT: The plan draft with FILE SCOPES is at `tmp/glm-plan.md`.
+YOUR TASK: Read the plan at `tmp/glm-plan.md`. Resolve the planner's FILE SCOPES to exact KEY FILES with `wc -l` counts, apply mechanical split/merge rules, and rewrite the plan in-place. Follow the workflow in volume-splitter.md:
+
+1. For every domain agent that has FILE SCOPES (not exact KEY FILES), resolve each scope to exact individual file paths. Glob wildcard patterns, `find` module directories, `test -f` explicit files. Run `wc -l` on every resolved file. Skip domains that already have exact KEY FILES (already resolved by a prior pass).
+2. Build a systematic volume audit table: every domain, exact files, exact LOC, baseline check (3K/10f), narrow-cap check (3.5K/15f), verdict (PASS / CLOSE CALL / SPLIT).
+3. Apply mechanical split rules:
+   - LOC ≤ 3000 AND files ≤ 10 → no split
+   - LOC > 3500 OR files > 15 → MUST split (no exceptions)
+   - 3001-3500 OR 11-15 files → split unless single cohesive module + no file > 200 LOC
+   - After splitting: if any sub-agent < 5 files AND < 1200 LOC → merge back (fragmentation)
+4. Rewrite the plan in-place: replace FILE SCOPES with resolved KEY FILES and exact LOC. Preserve all planner content: MUST ANSWER questions (copy verbatim to sub-agents when domain is split — organizer redistributes later), domain descriptions, agent assignments, second opinion pairings, intersection agent assignments, scope overlap instructions. Update agent counts and total estimates.
+5. Write `tmp/s0-volume-report.md`: volume audit table, splits applied (pre/post LOC), merge-backs applied, close calls accepted with justification.
+
+Do NOT modify severity, boundaries, CONVERGE ceilings, agent selections, or scope overlap instructions. Do NOT spawn agents beyond your report.
+WRITABLE FILES: tmp/glm-plan.md
+MUST ANSWER:
+1. What domains were split and why? List each split with exact pre-split and post-split LOC/file counts.
+2. Were any merge-backs applied? Which splits were reversed and why?
+3. Are all resolved file paths verified to exist on disk (test -f)? Any stale or missing paths?
+4. What is the final volume audit summary — total agents, domains at baseline pass, close calls, splits applied?
+
+=== TASK (s0-organize) ===
+PROJECT: [same project path]
+PRIOR CONTEXT: The plan with resolved KEY FILES and exact LOC is at `tmp/glm-plan.md`. The volume-splitter has already applied mechanical split/merge rules and built the volume audit table (see `tmp/s0-volume-report.md`).
+YOUR TASK: Read the plan at `tmp/glm-plan.md`. Review it using your structural analytical framework (see agent-organizer.md):
+
+1. Redistribute MUST ANSWER questions across split domains. When the volume-splitter created sub-agents by splitting a domain, the original MUST ANSWER questions were copied verbatim to all sub-agents. Assign each question to the sub-agent whose scope covers the relevant code. Write new scoped questions for split domains where the original questions don't cleanly map.
+
+2. Workflow quality (native anti-patterns): Check for over-staffing, wrong agent assignments, redundant agents, vague delegations, ignored dependencies, and stale agent references. Verify every agent .md file referenced in the plan exists on disk.
+
+3. Structural validation: Verify every DISCOVER/REVIEW stage has a corresponding VERIFY. Verify IMPLEMENT stages have a corresponding REVIEW. Verify MEDIUM+ severity tasks have second opinions in ALL DISCOVER and REVIEW stages, including CONVERGE iterations. This includes intersection agents — at MEDIUM+ severity, each intersection agent gets a second opinion with a different specialist. Verify FIX stages include post-fix REVIEW. If CONVERGE iteration 2 is planned, verify no agent is reused from iteration 1 (cross-check exclusion list mechanically — do NOT trust the plan's claim). Verify cross-domain integration reviewers are present for all ALWAYS/DEFAULT boundaries. Verify domain breadth counts specialists, not packages. Volume splitting is already handled by the volume-splitter — do NOT duplicate or re-split. Spot-check the volume audit for obvious errors (e.g., a 5,000 LOC domain marked PASS) and flag if found. Verify sequential stages are genuinely dependent.
+
+4. After review, apply all structural fixes directly to `tmp/glm-plan.md`. Volume adjustments are the splitter's domain — do NOT re-split or re-merge domains. Your report documents what was changed and why. Your output IS the final plan. This review runs on EVERY plan.
+
+WRITABLE FILES: tmp/glm-plan.md
+MUST ANSWER:
+1. What issues were found in the plan? (brick selection, severity classification, agent assignments, missing MUST ANSWER questions, dependencies, structural validation gaps, CONVERGE justification gaps, stale agent references)
+2. What MUST ANSWER question redistributions were applied for split domains?
+3. What changes were applied to produce the final plan? List each change with the specific issue it fixed.
+4. Were any review findings rejected, and why?
+5. Does the final plan have correct brick selection, severity classification, structural validation, verified KEY FILES for all agents, and valid MUST ANSWER questions?
