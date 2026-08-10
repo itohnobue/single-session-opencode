@@ -29,7 +29,7 @@ This is useful for storing intermediate results, reports, or data during multi-s
 | `adversarial-reviewer` | Falsification gate — part of the optional VERIFY block (critical issues, acted-on findings, or on demand). Process-only, independent of research data. |
 | `web-searcher` | Deep-research fallback for the main model when a task needs beyond the prepare budget. |
 
-The old 109 specialized agents were replaced: domain checklists are what the research phase produces — fresher and per-task. Specialist identity is now defined by the research-data themes (FOCUS), not by static `.md` personas. Rules below are empirically grounded (evidence: `tmp/bakeoff-comparison-report.md`, `tmp/bakeoff-plain-nohint-report.md`).
+The old 109 specialized agents were replaced: domain checklists are what the research phase produces — fresher and per-task. Specialist identity is now defined by the research-data themes (FOCUS), not by static `.md` personas. Rules below are empirically grounded.
 
 ---
 
