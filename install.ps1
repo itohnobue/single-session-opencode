@@ -59,6 +59,12 @@ What it does:
   3. Creates AGENTS.md with single-session workflow instructions
   4. Creates tmp\ directory for agent working files
 
+If .opencode\ already exists, suite files are synchronized to the current
+version: .opencode\agents\ is suite-owned (agent definitions not shipped by
+the suite are removed, all others updated), tools and templates are updated,
+and files you created yourself outside agents\ are kept.
+Your existing AGENTS.md is never overwritten.
+
 After installation:
   - Open your project with OpenCode
   - Give it tasks - the model works directly, spawning specialist agents as needed
@@ -120,21 +126,22 @@ function Main {
 
     if (Test-Path $opencodeDir) {
         Write-Warn ".opencode\ directory already exists in target"
-        Write-Host "  Merging new files (existing files will NOT be overwritten)..."
+        Write-Host "  Synchronizing suite files to the current version..."
 
-        Get-ChildItem -Path $srcOpencode -Recurse -File | ForEach-Object {
-            $relPath = $_.FullName.Substring($srcOpencode.Length)
-            $destFile = Join-Path $opencodeDir $relPath
-            $destDir = Split-Path $destFile -Parent
-
-            if (-not (Test-Path $destFile)) {
-                if (-not (Test-Path $destDir)) {
-                    New-Item -ItemType Directory -Path $destDir -Force | Out-Null
-                }
-                Copy-Item $_.FullName $destFile
+        # Remove stale agent definitions: agent .md files not shipped by the
+        # suite (e.g. leftovers from the old 109-agent version) are removed.
+        $srcAgentNames = Get-ChildItem -Path (Join-Path $srcOpencode "agents\*.md") -File | ForEach-Object { $_.Name }
+        Get-ChildItem -Path (Join-Path $opencodeDir "agents\*.md") -File | ForEach-Object {
+            if ($srcAgentNames -notcontains $_.Name) {
+                Remove-Item $_.FullName -Force
+                Write-Host "  Removed stale agent: $($_.Name)"
             }
         }
-        Write-Info "Merged into existing .opencode\"
+
+        # Copy all suite files, overwriting previous versions (agents, templates,
+        # tools, completions). User-created files outside the suite are kept.
+        Copy-Item -Path (Join-Path $srcOpencode "*") -Destination $opencodeDir -Recurse -Force
+        Write-Info "Synchronized .opencode\ to the current suite version"
     } else {
         Copy-Item -Path $srcOpencode -Destination $opencodeDir -Recurse
         Write-Info "Installed .opencode\ directory"
@@ -149,7 +156,13 @@ function Main {
     if (Test-Path $agentsMd) {
         $content = Get-Content $agentsMd -Raw
         if ($content -match "OpenCode") {
-            Write-Info "AGENTS.md already contains workflow instructions"
+            if ($content -match "109") {
+                Write-Warn "AGENTS.md is from an old suite version (109-agent workflow)"
+                Write-Host "  AGENTS.md was NOT overwritten - replace it with the new workflow manually:"
+                Write-Host "    Copy-Item $srcAgentsMd $agentsMd -Force"
+            } else {
+                Write-Info "AGENTS.md already contains workflow instructions"
+            }
         } else {
             Write-Warn "AGENTS.md exists but doesn't have workflow instructions"
             Write-Host "  You can append them manually:"

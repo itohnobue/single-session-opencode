@@ -47,6 +47,12 @@ What it does:
   3. Creates AGENTS.md with single-session workflow instructions
   4. Creates tmp/ directory for agent working files
 
+If .opencode/ already exists, suite files are synchronized to the current
+version: .opencode/agents/ is suite-owned (agent definitions not shipped by
+the suite are removed, all others updated), tools and templates are updated,
+and files you created yourself outside agents/ are kept.
+Your existing AGENTS.md is never overwritten.
+
 After installation:
   - Open your project with OpenCode
   - Give it tasks — the model works directly, spawning specialist agents as needed
@@ -103,24 +109,23 @@ main() {
 
   if [[ -d "$target/.opencode" ]]; then
     warn ".opencode/ directory already exists in target"
-    printf '  Merging new files (existing files will NOT be overwritten)...\n'
-    # Copy without overwriting — try multiple methods for portability
-    if rsync -a --ignore-existing "$SCRIPT_DIR/.opencode/" "$target/.opencode/" 2>/dev/null; then
-      : # rsync worked
-    else
-      # Fallback: manual copy (works on all platforms)
-      find "$SCRIPT_DIR/.opencode" -type f | while IFS= read -r src; do
-        rel="${src#"$SCRIPT_DIR/"}"
-        dst="$target/$rel"
-        if [[ ! -f "$dst" ]]; then
-          mkdir -p "$(dirname "$dst")"
-          cp "$src" "$dst"
-        fi
-      done
-    fi
-    info "Merged into existing .opencode/"
+    printf '  Synchronizing suite files to the current version...\n'
+    # Remove stale agent definitions: agent .md files not shipped by the suite
+    # (e.g. leftovers from the old 109-agent version) are removed.
+    for stale in "$target/.opencode/agents"/*.md; do
+      [[ -e "$stale" ]] || continue
+      base="${stale##*/}"
+      if [[ ! -f "$SCRIPT_DIR/.opencode/agents/$base" ]]; then
+        rm -f "$stale"
+        printf '  Removed stale agent: %s\n' "$base"
+      fi
+    done
+    # Copy all suite files, overwriting previous versions (agents, templates,
+    # tools, completions). User-created files outside the suite are kept.
+    cp -R "$SCRIPT_DIR/.opencode/." "$target/.opencode/"
+    info "Synchronized .opencode/ to the current suite version"
   else
-    cp -r "$SCRIPT_DIR/.opencode" "$target/.opencode"
+    cp -R "$SCRIPT_DIR/.opencode" "$target/.opencode"
     info "Installed .opencode/ directory"
   fi
 
@@ -132,7 +137,13 @@ main() {
 
   if [[ -f "$target/AGENTS.md" ]]; then
     if grep -q "OpenCode" "$target/AGENTS.md" 2>/dev/null; then
-      info "AGENTS.md already exists with workflow instructions"
+      if grep -q "109" "$target/AGENTS.md" 2>/dev/null; then
+        warn "AGENTS.md is from an old suite version (109-agent workflow)"
+        printf '  AGENTS.md was NOT overwritten — replace it with the new workflow manually:\n'
+        printf '    cat %s/AGENTS.md > %s/AGENTS.md\n\n' "$SCRIPT_DIR" "$target"
+      else
+        info "AGENTS.md already exists with workflow instructions"
+      fi
     else
       warn "AGENTS.md exists but doesn't have workflow instructions"
       printf '  You can append them manually:\n'

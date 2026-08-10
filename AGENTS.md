@@ -1,4 +1,12 @@
-# Project-Specific — single-session-opencode
+# Single-Session OpenCode
+
+## Operating notes
+
+On Windows:
+* Expand %USERPROFILE% to full path before running actual commands with it
+* Do not use cmd /c it never works
+
+---
 
 ## Temporary Files
 
@@ -11,30 +19,82 @@ This is useful for storing intermediate results, reports, or data during multi-s
 
 ## Agents
 
-109 specialized AI agents for OpenCode. Agents are stored in `.opencode/agents/` as Markdown files with YAML frontmatter.
+5 agents for OpenCode, built around the **prepare + execute pipeline** (research generation → execution → verification). Agents are stored in `.opencode/agents/` as Markdown files with YAML frontmatter. Full directory: `.opencode/agents/INDEX.md` — read it before delegating.
 
-**Discovery:** Do FULL read of `.opencode/agents/INDEX.md` for the full categorized agent directory (109 agents grouped by domain). Pick the MOST specialized agent — domain-specific checklists and anti-patterns only work when the agent matches the domain.
+| Agent | Role |
+|-------|------|
+| `prepare-agent` | Runs FIRST. Identifies every technology a task touches, researches up to 3 queries per technology (best practices, real domain knowledge, specialist advice), curates the highest-quality material into ONE ≤15KB research-data file (soft max — no minimum). `FOCUS:` parameter defines the specialist identity. Speed-limited by design. |
+| `executor-high` / `executor-max` | Runs AFTER prepare (HIGH = default for implementation/execution; MAX = research-type executor tasks: deep analysis, investigation — synthesis is mechanical and stays on HIGH). Reads the assembled prompt (template → RESEARCH DATA → task), applies the briefing as its working form, executes, reports. No research of its own. |
+| `adversarial-reviewer` | Falsification gate — part of the optional VERIFY block (critical issues or on demand). Process-only, independent of research data. |
+| `web-searcher` | Deep-research fallback for the main model when a task needs beyond the prepare budget. |
 
-### Agent Categories
+The old 109 specialized agents were replaced: domain checklists are what the research phase produces — fresher and per-task. Specialist identity is now defined by the research-data themes (FOCUS), not by static `.md` personas.
 
-| Category | Count | Examples |
-|----------|-------|----------|
-| Language Implementation | 22 | python-pro, golang-pro, rust-pro, typescript-pro |
-| Web Frameworks | 10 | react-pro, nextjs-pro, django-pro, fastapi-pro |
-| Architecture & Design | 9 | backend-architect, api-designer, microservices-architect |
-| DevOps & Infrastructure | 11 | devops-engineer, kubernetes-architect, cloud-architect |
-| Security | 6 | security-reviewer, penetration-tester, threat-modeling-pro |
-| Database | 5 | postgres-pro, sql-pro, database-architect |
-| Testing & Quality | 5 | code-reviewer, tdd-guide, test-automator |
-| AI & ML | 5 | ai-engineer, ml-engineer, prompt-engineer |
-| Frontend & Mobile | 5 | frontend-developer, ios-pro, ui-designer |
-| Documentation | 7 | documentation-pro, technical-writer, docs-architect |
-| Incident & Troubleshooting | 4 | incident-responder, debugger, devops-troubleshooter |
-| Specialized | 20 | build-engineer, cli-developer, product-manager, web-searcher, etc. |
+---
 
-### Agent Selection
+## Agent Delegation (prepare + execute)
 
-Most specialized wins (e.g., postgres-pro over database-optimizer). Split hybrid tasks into subtasks with different agents.
+**The main session is the primary worker** — it solves most work directly, in dialog with the user. Delegation is the exception, chosen by judgment: delegate when the task fits the criteria below. Trivial work (quick answers, small edits, questions, routine changes) never touches agents.
+
+**Use existing agents directly only on a 100% fit.** A task is solved with a single direct agent call ONLY when an existing agent fully matches the job — a pure research question → `web-searcher`; verifying a claim or finding → `adversarial-reviewer`. This is a shortcut for genuinely matching jobs, not a license to route everything through agents: most tasks stay in the session, and if the fit isn't 100%, the path below applies.
+
+**When to delegate (prepare + execute):**
+1. **No 100%-fit existing agent** exists for the job (the job needs a custom specialist — research generation plus a dedicated executor shaped by it).
+2. The task is **big and heavy** — a deep audit/review, a large refactor, a complex cross-module analysis, an unfamiliar domain, a non-trivial implementation (a real feature/module/subsystem — not a one-liner, not a routine edit).
+3. The task **needs lots of context to execute** — more than ~20% of a 1M-token context window (reading large codebases, very long files, many files): the subagent absorbs that in its own isolated context, returning a compact result.
+4. The task **needs research to solve it** AND the whole task is NOT just research — research is an input to doing the work (implementation, review, analysis), not the deliverable itself. The prepare phase generates that research; the executor does the work with it. (Scale qualifier: this applies to substantial tasks; a small task that just needs a quick lookup is solved in-session with `web_search.sh` — no delegation.)
+
+**Research tasks** (research IS the deliverable): default to `web-searcher` (100% fit) — a quick/simple lookup goes in-session with `web_search.sh`, substantial multi-query research goes to `web-searcher`. They are delegated ONLY under the same rules as any task: when the research task itself is big/heavy or context-hungry beyond what a single web-searcher run can hold — then it goes through prepare + execute like everything else (prepare searches, the executor synthesizes).
+
+**The flow (per delegated task):**
+
+1. **PREPARE** — spawn `prepare-agent` with a prepare task (includes `FOCUS: <angles>`, default `correctness, completeness`). Output: `tmp/prepare/<slug>-research.md` (soft max ~15KB, 1-2KB over fine). The prepare agent self-reviews its file before delivery (size, per-tech coverage, confidence tiers, policy baking, source mapping, no raw dumps) — the main model does NOT check; it only acts if the prepare report flags remaining issues. Prepare does research data only: no pre-solving, no trimming, full search output, knowledge fallback if web search fails.
+2. **ASSEMBLE (injection included)** — one command injects the research data AND wraps the template:
+   ```bash
+   .opencode/tools/assemble-task.sh -a executor-high -t TYPE  (or -a executor-max for deep analysis/investigation) -n {NAME} --task tmp/{NAME}-task.txt --research-file tmp/prepare/{NAME}-research.md -o tmp/{NAME}-task-prompt.txt
+   ```
+   Result structure: template → RESEARCH DATA → task. The standalone `.opencode/tools/inject-research.sh` exists for custom cases (pre-injected task files); do NOT combine both paths — passing `--research-file` with a task file that already contains a `## RESEARCH DATA` section is rejected.
+3. **EXECUTE** — spawn `executor-high` (default) for implementation-type work, or `executor-max` when the executor task is research-type (deep analysis, investigation — synthesis is mechanical and stays on HIGH). It reads the file, shapes its working form from the RESEARCH DATA, does the work, reports. **The delegation run ends here.** Verification is NOT part of it — it is a separate optional block (see VERIFY below), used for critical issues or on demand.
+
+### VERIFY (optional block — critical issues or on demand)
+
+Verification is NOT automatic. Run it when the work is critical/high-risk (production-critical changes, security-sensitive code, irreversible operations), when the user asks for it, or when judgment says the work needs falsification. The block:
+
+1. **Adversarial check** — spawn `adversarial-reviewer` to falsify the deliverable: bugs, edge cases, regressions, unhandled call paths, missed requirements. Runs STANDALONE — no second-opinion pair.
+2. **FIX stage** — every CONFIRMED finding from the adversarial check is a real issue: a fresh executor run (executor-high) fixes it, with the findings as additional context. REJECTED/WEAKENED findings are not issues to fix.
+3. **Re-verify** — re-run the adversarial check on the changed parts. Any new CONFIRMED findings go back to the FIX stage. Cap the loop at 3 fix passes — if issues persist beyond that, report them to the user as unresolved rather than looping forever.
+
+### Second-opinion rules
+
+- **When:** tasks whose deliverable is FINDINGS/ANALYSIS — research, review, discovery, audits — where the problem must be checked from different angles: at MEDIUM+ severity, when the user asks, or when the first opinion was inconclusive (no CONFIRMED findings but suspicion remains). NOT for implementation tasks — implementations get the optional VERIFY block instead (no second implementation run).
+- **How:** complementary FOCUS (e.g., primary `security, correctness` → second `performance, maintainability`). Never the same FOCUS twice. The two prepares run CONCURRENTLY as the first step; the two executors run concurrently after assembly.
+- **Paths:** every second-opinion run writes to its own paths (`*-s2-*`, `*-s3-*`...). Shared deliverable paths are forbidden — parallel runs collide (observed in testing).
+
+### Executor selection
+
+- `executor-high` — DEFAULT for all implementation/execution work.
+- `executor-max` — only for research-type executor tasks needing deep analysis or investigation. Synthesis and implementation are mechanical — they stay on HIGH.
+
+### Adversarial — when
+
+- Part of the optional VERIFY block — run it for critical/high-risk delegated work, when the user asks, or when judgment says the work needs falsification. NOT automatic after every delegation.
+- Trivial session work does NOT need it — self-review and tests suffice.
+- The model may also run a quick adversarial pass on its own work anytime (outside the block) when judgment says the work is high-risk.
+
+### Prepare task template (main model writes it)
+
+```
+PROJECT: Prepare phase for <task> on <repo>
+TARGET REPO: <abs path>
+REPO_ROOT: <abs path>
+WEB SEARCH TOOL: <abs path to web_search.sh>
+FOCUS: <angles, e.g. security, correctness>
+YOUR TASK (prepare-agent protocol): enumerate every technology, ≤3 queries per tech
+  leading with FOCUS angles, select highest-quality material, write ONE ≤15KB research-data file (soft max),
+  read target repo AGENTS.md and bake its policies in.
+DELIVERABLES: research-data file + prepare report paths
+MUST ANSWER: coverage mapping, file size, exclusions, confidence breakdown
+```
 
 ---
 
@@ -112,6 +172,7 @@ Multiple CLI instances work without conflicts. Resolution: `-S` flag > `MEMORY_S
 **Mechanics — ALL internet research must go through `web_search.sh`** — no exceptions. This means: no built-in websearch tool, no WebFetch tool, no `curl` against APIs, no manual GitHub API calls, no `wget`, nothing else. Every time you need information from the internet, use `./.opencode/tools/web_search.sh "query"` (or `.opencode/tools/web_search.bat` on Windows):
 - **One query per call** — run each query as a separate `web_search.sh` invocation. Never combine multiple queries into a single call. Run calls **sequentially** (one after another, not in parallel) to avoid hitting API rate limits
 - **Always use default options** — never add `-s`, `--max-results`, or any result-limiting flags. Let the tool use its built-in defaults
+- **FULL OUTPUT — agents must never trim results** — `prepare-agent` and `web-searcher` (and any agent running `web_search.sh`) must never pipe the tool through trimming utilities (`tail`, `head`, `less`, `more`, `grep -m`): search results are the research raw material, and trimmed output loses sources. If the tool reports truncation, read the full saved output file it points to.
 - **Scientific queries: add `--sci`** for CS, physics, math, engineering (arXiv + OpenAlex)
 - **Medical queries: add `--med`** for medicine, clinical trials, biomedical (PubMed + Europe PMC + OpenAlex)
 - **Tech queries: add `--tech`** for software dev, DevOps, IT, startups (Hacker News + Stack Overflow + Dev.to + GitHub)
@@ -157,7 +218,7 @@ This is a single-session agent suite — NOT an orchestration pipeline. The mode
 ### How it works
 
 1. **The model does the work directly.** The main model is the sole worker. It reads code, writes code, runs commands, verifies results, and delivers — all in the current session.
-2. **The model solves most work directly.** Subagents are the exception, not the default: the model spawns one only when a serious subtask genuinely benefits from a specialist's domain expertise or isolated context — and it makes that call itself, on sight. There is no planner, no manifest, no stage structure.
+2. **The model solves most work directly.** Subagents are the exception, not the default: the model spawns one only when the subtask is big and heavy or needs lots of context to execute (see Agent Delegation) — and it makes that call itself, on sight. There is no planner, no manifest, no stage structure.
 3. **The user works alongside the model.** The user interjects, redirects, asks questions, or assigns new tasks at any point mid-session. The model responds immediately — there is no "stage boundary" to respect.
 4. **Tasks are single-session sized.** This suite is for focused, self-contained tasks the model can complete in one session with the user. It is not for orchestrator-level multi-stage productions.
 
@@ -167,66 +228,67 @@ Before starting any non-trivial task, output your plan as text to the user — s
 
 ### When to spawn a subagent
 
-**Default: do the work directly.** The model solves simple and medium tasks itself. Subagents are for serious tasks only — spawn one when the task is genuinely hard AND delegation makes it materially better.
+**The main session is the default worker — delegate when the task fits the Agent Delegation criteria:**
 
-**Spawn ONLY when ALL of these hold:**
-1. **The task is serious.** A deep security audit, a large refactor, a complex cross-module analysis, an unfamiliar domain, a non-trivial implementation (a real feature, module, or subsystem — not a one-liner fix, not a routine edit, not a question the model can answer directly).
-2. **A specialist makes it materially better.** The subagent's domain checklists and anti-patterns produce a result the model would not reach alone (e.g., an idiomatic Rust refactor via `rust-pro`, a query optimization via `postgres-pro`, a security review via `security-reviewer`, a real implementation via the matching language specialist).
-3. **Context protection matters.** The subtask would fill a meaningful part of the model's context with reading/analysis that the subagent can absorb in its own isolated session, returning only a compact result (report + findings).
-
-Spawn when ANY of these match:
-- A subtask spans a domain the model would do better with a specialist's checklist (e.g., a deep security review, a complex SQL schema, an idiomatic Rust refactor)
-- A subtask is large and independent — the subagent holds the full scope in its own context while the model continues the main work
-- **Serious implementation work** — building a real feature, module, or subsystem; complex algorithmic code; a substantial component in a language the model should delegate to the matching specialist (e.g., `python-pro`, `typescript-pro`, `golang-pro`, `swift-pro`). The specialist writes it idiomatic and correct; the model reviews and integrates
-- A subtask benefits from isolation (audits, reviews, research) so the model's current context doesn't bias it
-- The model needs a second opinion or an independent check of its own work
+**Decision order:** (1) session work → main model directly; (2) an existing agent is a 100% fit (a research question → `web-searcher`, checking a claim → `adversarial-reviewer`) → single direct agent call, no prepare+execute — but only when the fit is really 100%, never as a default reflex; (3) otherwise → full delegated run (prepare + execute): no 100%-fit agent exists, the task is big/heavy or context-hungry, or the task needs research to solve it and is not JUST research (research is input to the work, not the deliverable). Research tasks default to `web-searcher`; they are delegated only when the research task itself is big/context-hungry beyond a single web-searcher run.
 
 **Do NOT spawn when:**
 - The work is simple, well-understood, or would take more coordination than doing it directly
 - The model can produce a correct result itself without excessive context use — delegation adds overhead, not quality
 - The only benefit would be perceived parallelism or "using the machinery" — there is no quota and no obligation to spawn
 
-**Mandatory exceptions (always used, not optional):**
+**Mandatory exception (always used, not optional):**
 - **Web research** — ANY external information need goes through `web_search.sh` first (see Web Research section). Research is the standing exception to "solve it yourself": the model does not guess facts it can verify online.
-- **Adversarial check** — after high-priority/high-risk work, `adversarial-reviewer` MUST verify the result (see Quality Practices).
+
+(Adversarial verification is NOT mandatory — it is the optional VERIFY block for critical issues or on demand, see Agent Delegation.)
 
 ### How to spawn
 
-All 109 agents are native opencode subagents, auto-loaded from `.opencode/agents/*.md`:
+All 5 agents are native opencode subagents, auto-loaded from `.opencode/agents/*.md`:
 
-1. Read the agent's `.md` file — always fresh re-read before delegating
-2. Assemble a task prompt with `assemble-task.sh`:
+**Standard flow (prepare + execute):**
+1. Write the prepare task (`tmp/{NAME}-prepare-task.txt`, FOCUS included) and the raw task (`tmp/{NAME}-task.txt`)
+2. Assemble + delegate PREPARE: `assemble-task.sh -a prepare-agent -t prepare -n prepare-{NAME} --task tmp/{NAME}-prepare-task.txt`, then `task(subagent_type="prepare-agent")` → research file `tmp/prepare/{NAME}-research.md`
+3. No gate step needed — the prepare agent self-reviews its research file against the quality contract before delivery and fixes issues it finds. Only if its report flags remaining issues: re-prepare or fix before executing.
+4. Assemble the EXECUTOR prompt (injection happens automatically):
    ```bash
-   .opencode/tools/assemble-task.sh -a AGENT -t TYPE -n NAME --task tmp/{NAME}-task.txt
+   .opencode/tools/assemble-task.sh -a executor-high -t TYPE  (or -a executor-max for deep analysis/investigation research tasks) -n {NAME} --task tmp/{NAME}-task.txt --research-file tmp/prepare/{NAME}-research.md -o tmp/{NAME}-task-prompt.txt
    ```
-   Types: `review` (coordination-review + severity + quality-rules-review), `code` (coordination-code + quality-rules-code), `research` (coordination-review + quality-rules-review). Produces `tmp/{NAME}-task-prompt.txt`.
-3. Delegate via the `task` tool — pass the file path with a read-and-execute instruction, NOT the full content:
+   Types: `code` / `review` / `research` (choose by work type). Produces `tmp/{NAME}-task-prompt.txt` with structure: template → RESEARCH DATA → task.
+5. Delegate via the `task` tool — pass the file path with a read-and-execute instruction, NOT the full content:
    ```
-   task(description="<3-5 words>", prompt="Read this file. Strictly follow instructions there and execute the described task: tmp/{NAME}-task-prompt.txt", subagent_type="<AGENT>")
+   task(description="<3-5 words>", prompt="Read this file. Strictly follow instructions there and execute the described task: tmp/{NAME}-task-prompt.txt", subagent_type="executor-high")  (or "executor-max" for deep analysis/investigation tasks)
    ```
-4. The task tool runs the agent as a native opencode subagent (isolated child session, full project permissions). It blocks until the subagent completes and returns only its final summary. Report: `tmp/{NAME}-report.md` (the subagent writes it).
+6. MEDIUM+ severity findings tasks: run the second-opinion flow (see Second-opinion rules — complementary FOCUS, own paths).
+7. **OPTIONAL VERIFY block** (critical issues or on demand): adversarial check on the executor's deliverable (STANDALONE — `adversarial-reviewer` falsifies: bugs, edge cases, regressions, missed requirements), then the FIX stage (a fresh executor run fixes every CONFIRMED finding with the findings as context), then RE-VERIFY (re-run the adversarial check on the changed parts; new CONFIRMED findings go back to the fix stage). Cap: 3 fix passes per task (see VERIFY under Agent Delegation).
 
-**Task file contents:** PROJECT, YOUR TASK (KEY FILES, CONTEXT, SCOPE), MUST ANSWER questions. Write `tmp/{NAME}-task.txt`, then assemble. Code agents get a WRITABLE FILES section listing exactly which source files they may modify.
+**Standalone use of agents outside the flow** (adversarial-reviewer, web-searcher): assemble with their agent name — `assemble-task.sh -a adversarial-reviewer -t review -n ...`.
 
-**Task prompt self-sufficiency (MANDATORY):** All per-task context must live in the task prompt — key files, scope, constraints, questions. Do NOT rely on AGENTS.md or the agent's `.md` as the operating manual for task specifics. The agent gets a self-contained assignment.
+**Task file contents:** PROJECT, YOUR TASK (KEY FILES, CONTEXT, SCOPE), MUST ANSWER questions, DELIVERABLES paths (unique per agent run). Write `tmp/{NAME}-task.txt`, then assemble. Code tasks get a WRITABLE FILES section listing exactly which source files may be modified.
 
-**Parallel spawns:** Only when several genuinely independent serious subtasks exist — issue multiple `task` calls in ONE message so they run concurrently. Keep parallel batches reasonable (up to ~5); coordination overhead grows with count.
+**Task prompt self-sufficiency (MANDATORY):** All per-task context must live in the task prompt — key files, scope, constraints, questions, research data. Do NOT rely on AGENTS.md or the agent's `.md` as the operating manual for task specifics. The agent gets a self-contained assignment.
+
+**Parallel spawns — DEFAULT to concurrent:** whenever agents are independent, run them in parallel (multiple `task` calls in ONE message) — e.g., second-opinion flows' two prepares, independent subtasks. Go SEQUENTIAL only when there is a real conflict: agents editing the same file, or a genuine dependency chain (B consumes A's output — e.g., an executor needs its research file first, adversarial needs the deliverable first). Keep parallel batches reasonable (up to ~5); coordination overhead grows with count. Parallel second-opinion runs MUST use their own paths (`-s2-` etc.) — shared paths collide.
 
 **Spawn discipline:**
 - **One task per agent.** A subagent executes exactly one task and writes one report. No chained multi-task agents.
 - **No two agents edit the same file in parallel** (read overlap is fine). If parallel work needs the same file, split by content or sequence the agents.
-- **Respawn discipline:** if an agent fails or produces wrong output, diagnose the root cause (bad prompt? wrong agent? environment?), fix it, and re-issue. Maximum 3 respawn attempts per agent (name them `-r2`, `-r3`). After 3 failures, stop and either do the work yourself or discuss the approach with the user.
+- **Respawn discipline:** if an agent fails or produces wrong output, diagnose the root cause (bad prompt? wrong agent? bad research data? environment?), fix it, and re-issue. Maximum 3 respawn attempts per agent (name them `-r2`, `-r3`). After 3 failures, stop and either do the work yourself or discuss the approach with the user.
 
 ### Reviewing agent output
 
 - Check the report exists and is non-empty — that's the primary gate
 - Read the report's findings and apply them to the main task
-- If an agent's output is wrong or incomplete: diagnose (bad prompt? wrong agent?), fix the task, and re-spawn with corrections (see spawn discipline above)
-- There is no mandated verification pipeline, no second opinions, no stage structure — the model reviews agent output with its own judgment, as it would its own work. The one exception is the adversarial gate for high-priority work (see Quality Practices below).
+- If an agent's output is wrong or incomplete: diagnose (bad prompt? wrong agent? bad research data?), fix the task, and re-spawn with corrections (see spawn discipline above)
+- Quality gates by pipeline stage: the research file must pass the prepare agent's quality self-review before execution; MEDIUM+ findings tasks get the second-opinion flow (complementary FOCUS); every delegated task may get the optional VERIFY block for critical issues or on demand (see Quality Practices below).
 
 ---
 
 ## Quality Practices
+
+### Research-file quality (self-reviewed by prepare — no separate gate)
+
+The research-file quality contract lives in the prepare agent's instructions, not in a script: size soft max ~15KB (1–2KB over acceptable, no minimum), every technology covered with per-tech sections, confidence tiers on claims, project policies baked in, source mapping, no raw dumps. The prepare agent self-reviews its file against this contract before delivery (max 2 fix passes) and reports remaining issues explicitly. The main model does NOT check the file — it only acts when the prepare report flags remaining issues (re-prepare or fix before executing). A scripted gate existed in testing and caught real format defects (e.g., a research file missing all confidence tiers), but was removed in favor of instruction-level self-review — content quality is additionally covered by the second-opinion flow at findings tasks and the adversarial finish.
 
 ### Verify before claiming (grep first)
 
@@ -234,17 +296,18 @@ Before claiming something is missing, broken, or unimplemented — grep for exis
 
 ### Self-review after non-trivial code
 
-After writing or modifying non-trivial code: re-read your own diff, run the available tests/build/lint, and check edge cases before delivering. Present the result as reviewed, with test results stated. For significant or security-sensitive changes, consider spawning `code-reviewer` for an independent pass.
+After writing or modifying non-trivial code: re-read your own diff, run the available tests/build/lint, and check edge cases before delivering. Present the result as reviewed, with test results stated. For significant or security-sensitive changes, consider running a quick `adversarial-reviewer` pass for an independent falsification check.
 
-### Adversarial check for high-priority work
+### Adversarial check (part of the optional VERIFY block)
 
-For very important, high-priority, or high-risk work (production-critical changes, security-sensitive code, irreversible operations, large refactors), the model MUST use the `adversarial-reviewer` agent to check the results for errors before delivering. The adversarial reviewer tries to FALSIFY the work: it reads the code with full surrounding context, searches exhaustively for counter-evidence, errors, and missed edge cases, and reports what survives as CONFIRMED issues.
+The optional VERIFY block (critical issues or on demand — see Agent Delegation) runs an adversarial check of the executor's deliverable: `adversarial-reviewer` runs STANDALONE (no second-opinion pair — second opinions belong to findings/research/review stages, not to the adversarial verification itself). (Routine trivial session work is covered by self-review and tests.) The adversarial reviewer tries to FALSIFY the work: it reads the deliverable with full surrounding context, searches exhaustively for counter-evidence, errors, and missed edge cases, and reports what survives as CONFIRMED issues.
 
 How to use it:
-- After the work is complete (code written or changes made), spawn `adversarial-reviewer` with a task that describes what was done and asks it to hunt for errors, regressions, and unhandled edge cases in the result
-- Include KEY FILES (the files that were changed), CONTEXT, and MUST ANSWER questions like: "Are there any bugs, edge cases, or regressions in this change? Is the change correct in all call paths?"
-- Treat its CONFIRMED findings as real issues — fix them (directly or via another subagent), then re-verify
-- This is a quality gate for high-stakes work only — do not use it for routine changes where self-review and tests suffice
+- After EXECUTE completes (code written, changes made, or findings reported), spawn `adversarial-reviewer` with a task that describes what was done and asks it to hunt for bugs, regressions, and unhandled edge cases in the result
+- Include KEY FILES (the files that were changed / the deliverable), CONTEXT, and MUST ANSWER questions like: "Are there any bugs, edge cases, or regressions in this change? Is the change correct in all call paths?"
+- Treat its CONFIRMED findings as real issues — the FIX stage fixes them (a fresh executor run with the findings as additional context)
+- Verdict contract: findings labeled CONFIRMED (survived falsification — real issue), WEAKENED, or REJECTED (attempted attack did not survive — not a real issue)
+- Re-verify: re-run the adversarial check on the changed parts; any new CONFIRMED findings go back to the fix stage. Cap: 3 fix passes per task — persistent issues are reported to the user, not looped forever
 
 ### Don't redo work without evidence
 

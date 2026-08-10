@@ -1,39 +1,44 @@
 #!/usr/bin/env bash
 # assemble-task.sh — Compose a task prompt for native opencode subagent delegation
 #
-# Builds ONLY the task prompt (templates +
-# task assignment) — the agent .md is loaded natively by opencode as the subagent's
-# system prompt, so it is NOT embedded here.
+# Builds the task prompt (templates + optional RESEARCH DATA injection +
+# task assignment) — the agent .md is loaded natively by opencode as the
+# subagent's system prompt, so it is NOT embedded here.
 #
 # The assembled task prompt is passed to the opencode `task` tool as the `prompt`
 # parameter (subagent_type = AGENT). Agents run as native opencode subagents with
 # full permissions inherited from the project config.
 #
 # Usage:
-#   .opencode/tools/assemble-task.sh -a AGENT -t TYPE -n NAME --task TASK_FILE [-o OUT]
+#   .opencode/tools/assemble-task.sh -a AGENT -t TYPE -n NAME --task TASK_FILE [-o OUT] [--research-file RESEARCH_FILE]
 #
 # Arguments:
 #   -a, --agent       Agent name — validates .opencode/agents/{agent}.md exists
-#   -t, --task-type   Task type: review | code | research
-#   -n, --name        Agent instance name (e.g. review-auth, impl-db, research-web)
+#   -t, --task-type   Task type: review | code | research | prepare
+#   -n, --name        Agent instance name (e.g. exec-review, impl-db, prepare-web)
 #   --task            Path to task assignment file (PROJECT, ENVIRONMENT,
 #                     PRIOR CONTEXT, YOUR TASK, WRITABLE FILES — main-model-written)
+#   --research-file   Path to the prepare agent's research-data file — injected as the
+#                     `## RESEARCH DATA` section between template and task (prepare+execute pipeline)
 #   -o, --output      Override output path (default: tmp/{name}-task-prompt.txt)
 #
 # Task type → template selection:
 #   review:   coordination-review + severity-guide + quality-rules-review
 #   code:     coordination-code   +                  quality-rules-code
 #   research: coordination-review +                  quality-rules-review
+#   prepare:  coordination-prepare +                 quality-rules-review
 #
 # Output (stdout):
 #   ASSEMBLED|name|output_path|bytes
 #
 # Examples:
-#   # Review — single task file (reviewers are read-only)
-#   .opencode/tools/assemble-task.sh -a code-reviewer -t review -n review-auth --task tmp/task.txt
+#   # Executor (prepare+execute standard): template → RESEARCH DATA → task
+#   .opencode/tools/assemble-task.sh -a executor-high -t code -n exec-impl (or -a executor-max for deep analysis/investigation tasks) --task tmp/impl-task.txt --research-file tmp/prepare/impl-research.md -o tmp/exec-impl-task-prompt.txt
 #
-#   # Code implementation — writes directly to original files
-#   .opencode/tools/assemble-task.sh -a python-pro -t code -n impl-db --task tmp/impl-db-task.txt
+#   # Prepare phase (research generation)
+#   .opencode/tools/assemble-task.sh -a prepare-agent -t prepare -n prepare-impl --task tmp/prepare-impl-task.txt
+#
+#   # Second opinion: second prepare (different FOCUS) + second executor
 
 set -euo pipefail
 
@@ -44,8 +49,12 @@ cd "$REPO_ROOT"
 AGENTS_DIR="$REPO_ROOT/.opencode/agents"
 TEMPLATES_DIR="$REPO_ROOT/.opencode/templates"
 
+# Escape & in REPO_ROOT so it is literal in sed replacements (valid dir chars
+# on macOS/Linux/Windows; & and | would otherwise corrupt s||| delimiters)
+REPO_ROOT_SED="${REPO_ROOT//&/\\&}"
+
 # ── Parse arguments ──
-AGENT="" TYPE="" NAME="" TASK_FILE="" OUTPUT=""
+AGENT="" TYPE="" NAME="" TASK_FILE="" OUTPUT="" RESEARCH_FILE=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -53,6 +62,7 @@ while [[ $# -gt 0 ]]; do
     -t|--task-type) TYPE="$2";      shift 2 ;;
     -n|--name)      NAME="$2";      shift 2 ;;
     --task)         TASK_FILE="$2"; shift 2 ;;
+    --research-file) RESEARCH_FILE="$2"; shift 2 ;;
     -o|--output)    OUTPUT="$2";    shift 2 ;;
     -h|--help)      sed -n '2,/^$/p' "$0" | sed 's/^# \?//'; exit 0 ;;
     *) echo "ERROR: Unknown arg: $1" >&2; exit 1 ;;
@@ -61,7 +71,7 @@ done
 
 # ── Validate required args ──
 [[ -z "$AGENT" ]]     && { echo "ERROR: -a AGENT required" >&2; exit 1; }
-[[ -z "$TYPE" ]]      && { echo "ERROR: -t TYPE required (review|code|research)" >&2; exit 1; }
+[[ -z "$TYPE" ]]      && { echo "ERROR: -t TYPE required (review|code|research|prepare)" >&2; exit 1; }
 [[ -z "$NAME" ]]      && { echo "ERROR: -n NAME required" >&2; exit 1; }
 [[ -z "$TASK_FILE" ]] && { echo "ERROR: --task FILE required" >&2; exit 1; }
 
@@ -87,6 +97,17 @@ AGENT_MD="$AGENTS_DIR/${AGENT}.md"
 [[ ! -s "$AGENT_MD" ]]   && { echo "ERROR: Agent file is empty: $AGENT_MD" >&2; exit 1; }
 [[ ! -f "$TASK_FILE" ]]  && { echo "ERROR: Task file not found: $TASK_FILE" >&2; exit 1; }
 [[ ! -s "$TASK_FILE" ]]  && { echo "ERROR: Task file is empty: $TASK_FILE" >&2; exit 1; }
+if [[ -n "$RESEARCH_FILE" ]]; then
+  [[ ! -f "$RESEARCH_FILE" ]] && { echo "ERROR: Research file not found: $RESEARCH_FILE" >&2; exit 1; }
+  [[ ! -s "$RESEARCH_FILE" ]] && { echo "ERROR: Research file is empty: $RESEARCH_FILE" >&2; exit 1; }
+  # Guard against double injection: the task file must NOT already contain research data
+  # (use EITHER inject-research.sh + plain assemble, OR --research-file — never both)
+  if grep -qi '^## RESEARCH DATA' "$TASK_FILE"; then
+    echo "ERROR: Task file already contains a RESEARCH DATA section AND --research-file was given — double injection." >&2
+    echo "       Use one path: (a) --research-file <file> with the RAW task file, or (b) pre-injected task file without the flag." >&2
+    exit 1
+  fi
+fi
 
 # ── Select templates based on task type ──
 INCLUDE_SEVERITY=false
@@ -107,8 +128,13 @@ case "$TYPE" in
     QUALITY="$TEMPLATES_DIR/quality-rules-code.txt"
     SEVERITY=""
     ;;
+  prepare)
+    COORDINATION="$TEMPLATES_DIR/coordination-prepare.txt"
+    QUALITY="$TEMPLATES_DIR/quality-rules-review.txt"
+    SEVERITY=""
+    ;;
   *)
-    echo "ERROR: Invalid task type '$TYPE' — must be review|code|research" >&2
+    echo "ERROR: Invalid task type '$TYPE' — must be review|code|research|prepare" >&2
     exit 1
     ;;
 esac
@@ -149,6 +175,14 @@ mkdir -p "$OUT_DIR"
   printf 'All reports and output files go to: %s/tmp/\n' "$REPO_ROOT"
   printf '%s\n\n' 'The PROJECT directory (below) is for READING source files — do NOT write reports there.'
   printf '%s\n\n' '--- TASK ASSIGNMENT ---'
+  # Research-first pipeline: inject the prepare agent's research data right
+  # after the template, before the task (structure: template → RESEARCH DATA → task).
+  if [[ -n "$RESEARCH_FILE" ]]; then
+    printf '%s\n' '## RESEARCH DATA (prepared by prepare agent — your briefing)'
+    printf '%s\n\n' 'This is the research the prepare agent did for this task. It is your briefing: use it, do not redo the research. Shape your working form from it before starting the task.'
+    cat "$RESEARCH_FILE"
+    printf '\n%s\n\n' '---'
+  fi
   # Substitute {NAME}, then strip standalone report-file paths written by the main model
   # (only lines that are sole report paths — prose references like
   # "See review-auth-report.md for context" are preserved).
@@ -159,15 +193,15 @@ mkdir -p "$OUT_DIR"
   # keeps the alternation | unescaped, so it is valid on GNU, BSD, and MSYS.
   sed "s|{NAME}|${NAME}|g" "$TASK_FILE" \
     | sed -E '/^[[:space:]]*(-[[:space:]]*)?(tmp\/)?[a-zA-Z0-9_.-]+-report\.md[[:space:]]*$/d' \
-    | sed "s|${REPO_ROOT}/tmp/|@REPO_TMP_PLACEHOLDER@|g" \
-    | sed -E "s,(^|[^[:alnum:]_])tmp/,\1${REPO_ROOT}/tmp/,g" \
-    | sed "s|@REPO_TMP_PLACEHOLDER@|${REPO_ROOT}/tmp/|g"
+    | sed "s|${REPO_ROOT_SED}/tmp/|@REPO_TMP_PLACEHOLDER@|g" \
+    | sed -E "s,(^|[^[:alnum:]_])tmp/,\1${REPO_ROOT_SED}/tmp/,g" \
+    | sed "s|@REPO_TMP_PLACEHOLDER@|${REPO_ROOT_SED}/tmp/|g"
   printf '\n'
   # Auto-inject the WRITABLE FILES directive. For review/research types,
   # source files are read-only. For code type, source files from the task
   # file's WRITABLE FILES section may be writable.
   printf '%s\n' '--- WRITABLE FILES (automatic) ---'
-  printf 'You must write your report to EXACTLY `%s/tmp/%s-report.md`.\n' "$REPO_ROOT" "$NAME"
+  printf 'Write your report to EXACTLY `%s/tmp/%s-report.md` UNLESS the task file has a DELIVERABLES section specifying explicit report paths — then use those.\n' "$REPO_ROOT" "$NAME"
   printf '%s\n' '(This is your working directory. NOT the PROJECT directory.)'
   case "$TYPE" in
     review|research)

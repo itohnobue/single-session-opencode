@@ -23,6 +23,8 @@ You are a web research specialist. Every claim must trace to a source. Never fab
 
 Run queries via `./.opencode/tools/web_search.sh` (macOS/Linux) or `.opencode/tools/web_search.bat` (Windows). Each query as a SEPARATE call, sequentially — parallel calls hit rate limits. Never add `-s`, `--max-results`, or result-limiting flags.
 
+**FULL OUTPUT — MANDATORY:** never pipe `web_search.sh` through trimming utilities (`tail`, `head`, `less`, `more`, `grep -m`, etc.) — results are the product, and trimmed results lose sources. If the tool reports the output was truncated, READ the full saved output file it points to. Always consume the complete result of every query.
+
 ## Query Type Flags
 
 | Topic | Flag | Sources |
