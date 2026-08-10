@@ -5,7 +5,7 @@ A single-session agent suite for [OpenCode](https://opencode.ai). All work happe
 ## Why use it
 
 - **One session, one worker** — You work with the model directly. It reads, writes, runs commands, and delivers — all in the current session. You can interject or redirect at any moment.
-- **Prepare + execute pipeline** — 5 lean agents instead of a wall of static specialists. For a serious task, `prepare-agent` researches it (best practices, domain knowledge, specialist advice) into one research-data file; an executor then does the work with that briefing. Specialist identity comes from the research data, not from canned `.md` personas — fresher and per-task.
+- **Tiered executor pipeline** — 5 lean agents instead of a wall of static specialists, governed by one context rule: plain execution (T1) when the task file already carries rich context; researched execution (T2) when the file is thin and needs current external facts — `prepare-agent` researches them into one research-data file, an executor does the work with that briefing; second-opinion runs (T3) pair a context-rule primary with a complementary-FOCUS research-backed second opinion. Specialist identity comes from the research data, not from canned `.md` personas — fresher and per-task.
 - **Proactive web research** — Whenever external knowledge is needed — specs, docs, APIs, best practices, recent changes — the model researches first via `web_search.sh` before answering or guessing. Research is the default, not an afterthought.
 - **Memory that survives** — Two-tier knowledge/session memory via `memory.sh`. Facts learned this session are available next session.
 - **Everything included** — Agents, tools, templates, install scripts. Copy the suite into any project with one command.
@@ -35,10 +35,11 @@ You ask: "Add dark mode" or "What's the best way to store these tokens?"
          │         recent changes. Never guesses when it can check
          ▼
     [Delegate?]    Big/heavy or context-hungry work, or a task that
-         │         needs research to solve it? The model runs the
-         │         prepare + execute pipeline: prepare-agent
-         │         researches → executor does the work with the
-         │         briefing. Otherwise keeps working directly
+         │         touches current external facts? The model runs the
+         │         tiered pipeline — T1 plain (the task's own context
+         │         is the briefing), T2 researched (prepare-agent
+         │         researches → executor works with the briefing),
+         │         T3 second opinion. Otherwise works directly
          ▼
      Delivered     Results, reports, and findings in the session;
          │         discoveries saved to memory; tmp/ cleaned
@@ -47,7 +48,7 @@ You ask: "Add dark mode" or "What's the best way to store these tokens?"
                    task — the model responds immediately
 ```
 
-No lead. No planning pipeline. No mandated verification stages — verification is the optional VERIFY block, run for critical/high-risk work or on demand. Just you, the model, and the pipeline on call — used only when the work is serious enough to need it.
+No lead. No planning pipeline. No mandated verification stages — verification is the optional VERIFY block, run for critical/high-risk work, acted-on findings, or on demand. Just you, the model, and the pipeline on call — used only when the work is serious enough to need it.
 
 ## Key concepts
 
@@ -57,12 +58,12 @@ No lead. No planning pipeline. No mandated verification stages — verification 
 
 | Agent | Role |
 |-------|------|
-| `prepare-agent` | Researches a task: every technology it touches, ≤3 queries per tech, one ≤15KB research-data file. `FOCUS:` parameter defines the specialist identity. |
-| `executor-high` / `executor-max` | Do the work after prepare, using the research data as their briefing. HIGH = default; MAX = deep-analysis/investigation research tasks. |
-| `adversarial-reviewer` | Falsification gate for the optional VERIFY block — tries to break the deliverable, reports CONFIRMED issues. |
+| `prepare-agent` | Researches a task (T2/T3 runs only): every technology it touches, ≤3 queries per tech, one ≤15KB research-data file. `FOCUS:` parameter defines the specialist identity. |
+| `executor-high` / `executor-max` | Do the work — T1 plain (the task file's own context is the briefing) or T2/T3 after prepare (research data as the briefing). HIGH = default; MAX = deep-analysis/investigation research tasks. |
+| `adversarial-reviewer` | Falsification gate for the optional VERIFY block — falsifies findings, challenges rejected-non-bug lists, reports CONFIRMED issues. |
 | `web-searcher` | Deep-research fallback when a task needs research beyond the prepare budget. |
 
-**Delegation** — The model solves simple and medium work itself. A delegated task runs: **prepare** (research generation) → **assemble** (`assemble-task.sh` injects the research data into the task prompt: template → RESEARCH DATA → task) → **execute** (the executor reads the file and does the work). Second-opinion runs (findings/analysis tasks) use a complementary FOCUS and their own paths. The optional **VERIFY block** — adversarial check → fix → re-verify, capped at 3 fix passes — runs for critical/high-risk work or on demand. No mandatory pipeline — delegation is the model's judgment call.
+**Delegation** — The model solves simple and medium work itself, and applies one context rule when delegating: **plain** when the task file already carries rich context (T1 — specs, contracts, and expected behaviors stated in PRIOR CONTEXT), **researched** when the file is thin and depends on current external facts (T2 — `prepare-agent` researches → `assemble-task.sh` injects the research into the task prompt: template → RESEARCH DATA → task → the executor does the work). Findings/analysis tasks at MEDIUM+ get a **second opinion** (T3): a context-rule primary plus a complementary-FOCUS research-backed second run — results are always merged, never replaced. The optional **VERIFY block** — adversarial check → fix → re-verify, capped at 3 fix passes — runs for critical/high-risk work, acted-on findings, or on demand. No mandatory pipeline — delegation is the model's judgment call.
 
 **Proactive web research** — The core discipline of this suite: before answering anything that touches the external world, the model runs `./.opencode/tools/web_search.sh "query"` (or `web_search.bat` on Windows). Facts, versions, API contracts, docs, alternatives, breaking changes — all researched, never guessed. For deep multi-query research the model may delegate to the `web-searcher` agent instead.
 

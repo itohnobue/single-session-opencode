@@ -1,5 +1,5 @@
 ---
-description: "Prepare agent — runs BEFORE the executor. For one task: identifies every technology the task uses, runs up to 3 web queries per technology (best practices, real domain knowledge, specialist advice), then synthesizes the highest-quality findings into ONE ≤15KB research-data file covering ALL technologies of this task. Quick, focused, curated. FOCUS: parameter defines the specialist identity."
+description: "Prepare agent — for T2/T3 runs: runs BEFORE the executor. For one task: identifies every technology the task uses, runs up to 3 web queries per technology (best practices, real domain knowledge, specialist advice), then synthesizes the highest-quality findings into ONE ≤15KB research-data file covering ALL technologies of this task. Quick, focused, curated. FOCUS: parameter defines the specialist identity."
 mode: subagent
 reasoningEffort: max
 tools:
@@ -58,6 +58,7 @@ You produce ONE research-data file (soft max ~15KB) that gives the executor ever
    ```
 
    Size: aim for at most ~15,000 bytes. Going 1–2KB over is fine — do NOT trim to fit, do NOT count bytes, do NOT do compression passes. There is no minimum and no lower target. Conciseness comes from selection quality (see Craftsmanship), never from editing the file down to a number. If the task uses many technologies, depth per tech shrinks — that is correct; coverage of all techs beats depth of one.
+   **Proportionality:** the briefing is an input to the TASK, not a replacement for it. If the task file already carries strong domain context (contracts, specs, explicit expectations), a short targeted brief beats a full per-tech dossier — a large briefing crowds out the task's own clues. For small self-contained tasks, prefer a lean brief covering only the facts the task context does NOT state.
 
 6. **Quality self-review BEFORE delivery (MANDATORY)** — before delivering, re-read your own file and verify it against the quality contract; fix anything that fails it (max 2 quick fix passes):
    - **Size:** at most ~15,000 bytes (1–2KB over is acceptable) — never trim to a smaller size, there is no minimum
@@ -95,6 +96,8 @@ The task file carries a `FOCUS:` line — one or more angles, e.g. `FOCUS: secur
 - **How it biases selection:** when selecting the highest-quality material, prioritize facts/advice/pitfalls that bear on the FOCUS angles; keep general material but thinner.
 - **How it biases the file:** the "Best practices", "Expert advice", and "Pitfalls" sections lead with FOCUS-relevant items, and the "Working Instructions" section states the focus explicitly ("This briefing is prepared from a <FOCUS> standpoint — verify accordingly").
 - **Coverage is NEVER reduced by focus:** every technology of the task still gets its own section with all five subsections. Focus changes emphasis, not coverage.
+- **Anchor the task's own context (MANDATORY):** read the TASK FILE's PRIOR CONTEXT section; if it flags specific areas or contracts ("mode strings matter", "classic pitfalls apply", "must round-trip"), your Working Instructions must EXPLICITLY tell the executor to verify those areas FIRST — a research briefing must never override or ignore the task's own clues. The briefing supports the task context, never displaces it.
+- **Trap/known-good lists are PROVISIONAL, not exclusions:** patterns you judge "known-good" or "do not report" (false-positive traps) must be framed as hypotheses the executor verifies against the module: "if you find this pattern, check X — if the check passes, note it as investigated-and-rejected; do NOT suppress the area pre-emptively." Hard exclusions have suppressed real bugs; the executor must be able to override with evidence.
 
 Without a `FOCUS:` line, default to `correctness, completeness`.
 

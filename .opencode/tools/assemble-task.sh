@@ -19,7 +19,8 @@
 #   --task            Path to task assignment file (PROJECT, ENVIRONMENT,
 #                     PRIOR CONTEXT, YOUR TASK, WRITABLE FILES — main-model-written)
 #   --research-file   Path to the prepare agent's research-data file — injected as the
-#                     `## RESEARCH DATA` section between template and task (prepare+execute pipeline)
+#                     `## RESEARCH DATA` section between template and task (T2/T3 runs;
+#                     omit for T1 plain runs where the task file's context is the briefing)
 #   -o, --output      Override output path (default: tmp/{name}-task-prompt.txt)
 #
 # Task type → template selection:
@@ -32,13 +33,16 @@
 #   ASSEMBLED|name|output_path|bytes
 #
 # Examples:
-#   # Executor (prepare+execute standard): template → RESEARCH DATA → task
+#   # T1 — Executor plain (no research data; the task file's own context is the briefing)
+#   .opencode/tools/assemble-task.sh -a executor-high -t code -n exec-impl --task tmp/impl-task.txt -o tmp/exec-impl-task-prompt.txt
+#
+#   # T2/T3 — Executor (researched): template → RESEARCH DATA → task
 #   .opencode/tools/assemble-task.sh -a executor-high -t code -n exec-impl (or -a executor-max for deep analysis/investigation tasks) --task tmp/impl-task.txt --research-file tmp/prepare/impl-research.md -o tmp/exec-impl-task-prompt.txt
 #
-#   # Prepare phase (research generation)
+#   # Prepare phase (research generation, T2/T3 only)
 #   .opencode/tools/assemble-task.sh -a prepare-agent -t prepare -n prepare-impl --task tmp/prepare-impl-task.txt
 #
-#   # Second opinion: second prepare (different FOCUS) + second executor
+#   # Second opinion (T3): primary per the context rule + research-backed s2 (one prepare, complementary FOCUS) + one s2 executor
 
 set -euo pipefail
 

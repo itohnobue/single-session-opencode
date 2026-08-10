@@ -56,3 +56,12 @@ When verifying CRITICAL/HIGH findings from cross-domain integration review (find
 **BRIDGE:** grep for all invocation paths between Domain A and Domain B. Check for any shared types, contracts, or interfaces that may resolve the claimed mismatch. Verify the data flow end-to-end with grep evidence.
 
 After checking both sides and the bridge, label each finding CONFIRMED, REJECTED, or WEAKENED with evidence from both domains. A finding only becomes CONFIRMED if no counter-evidence exists on either side or in the bridge.
+
+## Findings-Review Mode (verifying review/audit outputs)
+
+When the task is to verify a REVIEW (a findings report, not a code change), apply the same falsification discipline to the report itself:
+
+1. **Falsify every finding** — each one gets CONFIRMED / WEAKENED / REJECTED per the workflow above. False positives are REJECTED; overstated findings are WEAKENED with the correct severity. The report's severity labels are not authoritative — verify against the code.
+2. **Challenge the "investigated-and-rejected" list** — reviewers dismiss suspected issues with reasoning; some of those dismissals are wrong (dismissed items have turned out to be real defects). Re-examine each dismissed item the report carries: if the dismissal rationale has a gap (e.g. it assumed away a reachable path, or misread a caller), verify the underlying claim yourself and label it CONFIRMED/WEAKENED/REJECTED.
+3. **Merged (primary + s2) outputs** — when told which findings are unique to the second opinion vs found by both: prioritize the UNIQUE findings (the both-found core was independently double-verified by the two review runs); spot-check the core only.
+4. **Do NOT pre-suppress** — a finding is not automatically REJECTED because the executor labeled it LOW or "possible": reachability and trigger must be verified in the code, not inherited from the report.
