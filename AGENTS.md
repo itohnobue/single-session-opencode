@@ -302,6 +302,27 @@ All 5 agents are native opencode subagents, auto-loaded from `.opencode/agents/*
 - If an agent's output is wrong or incomplete: diagnose (bad prompt? wrong agent? bad research data?), fix the task, and re-spawn with corrections (see spawn discipline above)
 - Quality gates by pipeline stage: the research file must pass the prepare agent's quality self-review before execution; MEDIUM+ findings tasks get the second-opinion flow (complementary FOCUS); every delegated task may get the optional VERIFY block for critical issues or on demand (see Quality Practices below).
 
+### Standard Bug-Fix Flow (findings → fixed & verified)
+
+The default pipeline for turning findings into verified fixes — general, applies to any project and any source of findings (log analysis, code review, user reports, test failures, audits). For log-derived findings the discovery phase is handled by the `/process-report-logs` skill; for everything else the chain below IS the standard way to fix bugs. **One agent per finding at every stage; parallelize only across independent findings** (respect the parallel-spawn rules above).
+
+The chain (each stage consumes the previous stage's reports as PRIOR CONTEXT — pass the report paths, never flattened summaries):
+
+1. **DISCOVER** (only if findings don't exist yet) — one analysis agent per session/source finds the problems and files severity-labeled findings with evidence (file:line, quoted lines). For log packages: the `/process-report-logs` skill's Phase 1-2 (analysis agents per log group + synthesis agent) and Phase 3 report-back run first.
+2. **REVIEW** (one `executor-high`, type `review`, per finding) — locates the exact root cause in source, proposes a MINIMAL surgical fix (5-15 lines, no heavy refactoring), checks test impact. Verdict: **FIXABLE / EXCLUDE** (with justification).
+   - **Git cross-check (MANDATORY in every review brief):** the finding's area must be checked against commits made since the relevant baseline — for report/log-derived findings: the version stated in the report (locate its "Version updated: X.YYY" commit, then `git log <bump-commit>..HEAD --oneline`); otherwise: the last version bump. If the area was already modified: determine whether the existing change covers the observed case or whether a variant/gap remains. Cite the commits. Regression-awareness rules (Quality Practices) apply.
+3. **ADVERSARIAL** (one `adversarial-reviewer` per finding) — falsifies the review's claims: the root-cause attribution AND the fix proposal (would the fix actually work? does the code already handle the case through another path? does the proposal miss a variant? is it minimal and safe?). Verdicts CONFIRMED / REJECTED / WEAKENED per claim. Only surviving reviews proceed to FIX; REJECTED/WEAKENED findings are dropped or downgraded.
+4. **FIX** (one `executor-high`, type `code`, per FIXABLE finding) — implements exactly the reviewed-and-adversarially-verified fix. WRITABLE FILES = the exact files. Self-verify: py_compile/syntax of changed files, grep affected tests, targeted test run (never the full suite). Report the diff and the verification result.
+5. **POST-FIX REVIEW** (one `executor-high`, type `review`, per fix) — verifies the applied diff against the original fix design: correctness, minimality, new bugs, test breakage, race conditions. Verdict **APPROVED / NEEDS-FIX**.
+6. **POST-FIX ADVERSARIAL** (ONLY if any post-fix review produced MEDIUM+ findings) — one `adversarial-reviewer` per such finding. All clean → skip.
+7. **FINAL FIXES** — apply any confirmed post-fix findings (fresh executor run per finding), then re-review. Report the final picture to the user: finished & skipped issues, verdicts, and (for log-derived bugs) the UI smoke tests per the log-analysis skill.
+
+Naming: `s1-review-<id>`, `s1-adv-<id>`, `s1-fix-<id>`, `s1-rereview-<id>`, `s1-postadv-<id>` (report paths must be unique per agent run).
+
+Cap: 3 fix passes per finding (see VERIFY). Never batch multiple findings into one fix agent unless they share the same file/flow — then split by file; never let two agents edit the same file in parallel.
+
+**Tier rule in this flow:** review and fix briefs are **T1 (plain)** — the finding evidence, root-cause context, and fix design travel in the task file, which IS the briefing; the agent reads internal codebase facts itself. Research (T2/prepare) enters only when the fix depends on current external facts the task file does not carry. **State the tier explicitly in every brief** (e.g. "TIER: T1 — task file carries rich context; all facts internal"). The synthesis/report stage that produced the findings is where external research (if any) would have been baked in already.
+
 ---
 
 ## Quality Practices
