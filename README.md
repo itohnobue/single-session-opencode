@@ -5,7 +5,7 @@ A single-session agent suite for [OpenCode](https://opencode.ai). All work happe
 ## Why use it
 
 - **One session, one worker** — You work with the model directly. It reads, writes, runs commands, and delivers — all in the current session. You can interject or redirect at any moment.
-- **Tiered executor pipeline** — 5 lean agents instead of a wall of static specialists, governed by one context rule: plain execution (T1) when the task file already carries rich context; researched execution (T2) when the file is thin and needs current external facts — `prepare-agent` researches them into one research-data file, an executor does the work with that briefing; second-opinion runs (T3) pair a context-rule primary with a complementary-FOCUS research-backed second opinion. Specialist identity comes from the research data, not from canned `.md` personas — fresher and per-task.
+- **Tiered executor pipeline** — 4 lean agents instead of a wall of static specialists, governed by one context rule: plain execution (T1) when the task file already carries rich context; researched execution (T2) when the file is thin and needs current external facts — `prepare-agent` researches them into one research-data file, an executor does the work with that briefing; second-opinion runs (T3) pair a context-rule primary with a complementary-FOCUS research-backed second opinion. Specialist identity comes from the research data, not from canned `.md` personas — fresher and per-task.
 - **Proactive web research** — Whenever external knowledge is needed — specs, docs, APIs, best practices, recent changes — the model researches first via `web_search.sh` before answering or guessing. Research is the default, not an afterthought.
 - **Memory that survives** — Two-tier knowledge/session memory via `memory.sh`. Facts learned this session are available next session.
 - **Everything included** — Agents, tools, templates, install scripts. Copy the suite into any project with one command.
@@ -54,12 +54,12 @@ No lead. No planning pipeline. No mandated verification stages — verification 
 
 **Single session** — The operator and the model work together in one session. Tasks are focused and self-contained — sized so the model completes them while you watch. Not orchestrator-scale productions.
 
-**The 5 agents** (`.opencode/agents/`, INDEX.md is the quick reference):
+**The 4 agents** (`.opencode/agents/`, INDEX.md is the quick reference):
 
 | Agent | Role |
 |-------|------|
 | `prepare-agent` | Researches a task (T2/T3 runs only): every technology it touches, ≤3 queries per tech, one ≤15KB research-data file. `FOCUS:` parameter defines the specialist identity. |
-| `executor-high` / `executor-max` | Do the work — T1 plain (the task file's own context is the briefing) or T2/T3 after prepare (research data as the briefing). HIGH = default; MAX = deep-analysis/investigation research tasks. |
+| `executor` | Does the work — T1 plain (the task file's own context is the briefing) or T2/T3 after prepare (research data as the briefing). All work types: implementation, review, research, second opinion. |
 | `adversarial-reviewer` | Falsification gate for the optional VERIFY block — falsifies findings, challenges rejected-non-bug lists, reports CONFIRMED issues. |
 | `web-searcher` | Deep-research fallback when a task needs research beyond the prepare budget. |
 

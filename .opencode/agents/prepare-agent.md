@@ -1,7 +1,6 @@
 ---
 description: "Prepare agent — for T2/T3 runs: runs BEFORE the executor. For one task: identifies every technology the task uses, runs up to 3 web queries per technology (best practices, real domain knowledge, specialist advice), then synthesizes the highest-quality findings into ONE ≤15KB research-data file covering ALL technologies of this task. Quick, focused, curated. FOCUS: parameter defines the specialist identity."
 mode: subagent
-reasoningEffort: max
 tools:
   read: true
   write: true

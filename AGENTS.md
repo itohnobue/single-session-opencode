@@ -17,15 +17,14 @@ This is useful for storing intermediate results, reports, or data during multi-s
 **Path resolution:** All `tmp/` paths resolve to `$REPO_ROOT/tmp/` where `$REPO_ROOT` is the absolute path to the repository root (the directory where `opencode` was launched). Always reference `tmp/` paths relative to `$REPO_ROOT`.
 
 ---
-
 ## Agents
 
-5 agents for OpenCode, built around the **tiered executor pipeline** (context rule → T1 plain / T2 researched / T3 primary per context rule + research-backed s2 → optional verification). Agents are stored in `.opencode/agents/` as Markdown files with YAML frontmatter. Full directory: `.opencode/agents/INDEX.md` — read it before delegating.
+4 agents for OpenCode, built around the **tiered executor pipeline** (context rule → T1 plain / T2 researched / T3 primary per context rule + research-backed s2 → optional verification). Agents are stored in `.opencode/agents/` as Markdown files with YAML frontmatter. Full directory: `.opencode/agents/INDEX.md` — read it before delegating.
 
 | Agent | Role |
 |-------|------|
 | `prepare-agent` | Research generation for T2/T3 tasks only. Identifies every technology a task touches, researches up to 3 queries per technology (best practices, real domain knowledge, specialist advice), curates the highest-quality material into ONE ≤15KB research-data file (soft max — no minimum). `FOCUS:` parameter defines the specialist identity. Speed-limited by design. |
-| `executor-high` / `executor-max` | Executes the assembled task (T1: task context is the briefing; T2/T3: template → RESEARCH DATA → task; HIGH = default for implementation/execution; MAX = research-type executor tasks: deep analysis, investigation — synthesis is mechanical and stays on HIGH). No research of its own. |
+| `executor` | The single executor for all tiers and work types — executes the assembled task (T1: task context is the briefing; T2/T3: template → RESEARCH DATA → task). No research of its own. |
 | `adversarial-reviewer` | Falsification gate — part of the optional VERIFY block (critical issues, acted-on findings, or on demand). Process-only, independent of research data. |
 | `web-searcher` | Deep-research fallback for the main model when a task needs beyond the prepare budget. |
 
@@ -61,17 +60,17 @@ Plain (no research) is used ONLY when the task file already carries rich context
 2. **PREPARE** (T2/T3 only) — spawn `prepare-agent` with a prepare task (includes `FOCUS: <angles>`, default `correctness, completeness`). Output: `tmp/prepare/<slug>-research.md` (soft max ~15KB, 1-2KB over fine). The prepare agent self-reviews its file before delivery (size, per-tech coverage, confidence tiers, policy baking, source mapping, no raw dumps) — the main model does NOT check; it only acts if the prepare report flags remaining issues. Prepare does research data only: no pre-solving, no trimming, full search output, knowledge fallback if web search fails.
 3. **ASSEMBLE** — one command wraps the template, (optionally) injects the research data, and appends the task:
    ```bash
-   .opencode/tools/assemble-task.sh -a executor-high -t TYPE  (or -a executor-max for deep analysis/investigation) -n {NAME} --task tmp/{NAME}-task.txt [--research-file tmp/prepare/{NAME}-research.md] -o tmp/{NAME}-task-prompt.txt
+   .opencode/tools/assemble-task.sh -a executor -t TYPE -n {NAME} --task tmp/{NAME}-task.txt [--research-file tmp/prepare/{NAME}-research.md] -o tmp/{NAME}-task-prompt.txt
    ```
    Result structure: template → RESEARCH DATA (T2/T3 only) → task. The standalone `.opencode/tools/inject-research.sh` exists for custom cases (pre-injected task files); do NOT combine both paths — passing `--research-file` with a task file that already contains a `## RESEARCH DATA` section is rejected.
-4. **EXECUTE** — spawn `executor-high` (default) for implementation-type work, or `executor-max` when the executor task is research-type (deep analysis, investigation — synthesis is mechanical and stays on HIGH). It reads the file, does the work, reports. **The delegation run ends here.** Verification is NOT part of it — it is a separate optional block (see VERIFY below), used for critical issues, acted-on findings, or on demand.
+4. **EXECUTE** — spawn `executor` (default for all work types — implementation, deep analysis, investigation). It reads the file, does the work, reports. **The delegation run ends here.** Verification is NOT part of it — it is a separate optional block (see VERIFY below), used for critical issues, acted-on findings, or on demand.
 
 ### VERIFY (optional block — critical issues, acted-on findings, or on demand)
 
 Verification is NOT automatic. Run it when: (a) the work is critical/high-risk (production-critical changes, security-sensitive code, irreversible operations); (b) a findings-type task's results will be acted on (triage/fix pipelines, user-facing reviews) — T3 merged outputs carry the most false positives (the s2's speculative tail) and benefit most, as does any output whose task file proved thinner than expected; (c) the user asks, or judgment says the work needs falsification. The block:
 
 1. **Adversarial check** — spawn `adversarial-reviewer` to falsify the deliverable. For findings-type work it does two things: (a) falsify every finding — false positives get REJECTED, overstated ones WEAKENED with the correct severity; (b) **challenge the executor's "investigated-and-rejected" list** — executors have dismissed real bugs, so the adversarial re-examines those dismissals, not just the filed findings. On T3 merged outputs, prioritize the UNIQUE findings (primary-only and s2-only, per the s2's uniqueness statement) — the both-found core is already double-verified by two independent opinions. Runs STANDALONE — no second-opinion pair.
-2. **FIX stage** — every CONFIRMED finding from the adversarial check is a real issue: a fresh executor run (executor-high) fixes it, with the findings as additional context. REJECTED/WEAKENED findings are not issues to fix.
+2. **FIX stage** — every CONFIRMED finding from the adversarial check is a real issue: a fresh executor run (`executor`) fixes it, with the findings as additional context. REJECTED/WEAKENED findings are not issues to fix.
 3. **Re-verify** — re-run the adversarial check on the changed parts. Any new CONFIRMED findings go back to the FIX stage. Cap the loop at 3 fix passes — if issues persist beyond that, report them to the user as unresolved rather than looping forever.
 
 ### Second-opinion rules
@@ -84,9 +83,8 @@ Verification is NOT automatic. Run it when: (a) the work is critical/high-risk (
 
 ### Executor selection
 
-- `executor-high` — DEFAULT for all implementation/execution work.
-- `executor-max` — only for research-type executor tasks needing deep analysis or investigation. Synthesis and implementation are mechanical — they stay on HIGH.
-- Research-treatment tiers (T1/T2/T3) are chosen at ASSEMBLE time — see "Executor tiers" above. T1 runs use the same executors without `--research-file`.
+- `executor` — the single executor for ALL work types (implementation, execution, deep analysis, investigation).
+- Research-treatment tiers (T1/T2/T3) are chosen at ASSEMBLE time — see "Executor tiers" above. T1 runs use the same executor without `--research-file`.
 
 ### Adversarial — when
 
@@ -260,24 +258,24 @@ Before starting any non-trivial task, output your plan as text to the user — s
 
 ### How to spawn
 
-All 5 agents are native opencode subagents, auto-loaded from `.opencode/agents/*.md`:
+All 4 agents are native opencode subagents, auto-loaded from `.opencode/agents/*.md`:
 
 **Standard flow (tiered):**
 1. Write the raw task (`tmp/{NAME}-task.txt`) — PRIOR CONTEXT is a first-class input: state contracts, specs, environment, and expected behaviors explicitly; the executor leans on them. If the task depends on current external facts you cannot state, that is the T2 signal (the prepare supplies them). For T2/T3 also write the prepare task (`tmp/{NAME}-prepare-task.txt`, FOCUS included).
 2. **T1 (context rule: rich context only — implementations included when specs/contracts are stated):** assemble WITHOUT research:
    ```bash
-   .opencode/tools/assemble-task.sh -a executor-high -t TYPE -n {NAME} --task tmp/{NAME}-task.txt -o tmp/{NAME}-task-prompt.txt
+   .opencode/tools/assemble-task.sh -a executor -t TYPE -n {NAME} --task tmp/{NAME}-task.txt -o tmp/{NAME}-task-prompt.txt
    ```
    Then go to step 5. The task file's PRIOR CONTEXT is the briefing — write it to carry whatever the executor needs (contracts, specs, and any facts you already researched).
 3. **T2 (context rule: thin context — research needed but not made beforehand):** assemble + delegate PREPARE: `assemble-task.sh -a prepare-agent -t prepare -n prepare-{NAME} --task tmp/{NAME}-prepare-task.txt`, then `task(subagent_type="prepare-agent")` → research file `tmp/prepare/{NAME}-research.md`. No gate step needed — the prepare agent self-reviews its research file against the quality contract before delivery and fixes issues it finds. Only if its report flags remaining issues: re-prepare or fix before executing.
 4. Assemble the EXECUTOR prompt (injection happens automatically):
    ```bash
-   .opencode/tools/assemble-task.sh -a executor-high -t TYPE  (or -a executor-max for deep analysis/investigation research tasks) -n {NAME} --task tmp/{NAME}-task.txt --research-file tmp/prepare/{NAME}-research.md -o tmp/{NAME}-task-prompt.txt
+   .opencode/tools/assemble-task.sh -a executor -t TYPE -n {NAME} --task tmp/{NAME}-task.txt --research-file tmp/prepare/{NAME}-research.md -o tmp/{NAME}-task-prompt.txt
    ```
    Types: `code` / `review` / `research` (choose by work type). Produces `tmp/{NAME}-task-prompt.txt` with structure: template → RESEARCH DATA → task.
 5. Delegate via the `task` tool — pass the file path with a read-and-execute instruction, NOT the full content:
    ```
-   task(description="<3-5 words>", prompt="Read this file. Strictly follow instructions there and execute the described task: tmp/{NAME}-task-prompt.txt", subagent_type="executor-high")  (or "executor-max" for deep analysis/investigation tasks)
+   task(description="<3-5 words>", prompt="Read this file. Strictly follow instructions there and execute the described task: tmp/{NAME}-task-prompt.txt", subagent_type="executor")
    ```
 6. MEDIUM+ severity findings tasks: run the second-opinion flow — T3: primary per the context rule (already done in step 5) + research-backed s2 (one prepare with complementary FOCUS + one s2 executor, own paths — see Second-opinion rules).
 7. **OPTIONAL VERIFY block** (critical issues, acted-on findings, or on demand): adversarial check on the deliverable — for findings-type work it falsifies every finding AND challenges the executor's rejected-non-bug list; on T3 merges it prioritizes the unique findings (STANDALONE — `adversarial-reviewer`). Then the FIX stage (a fresh executor run fixes every CONFIRMED finding with the findings as context), then RE-VERIFY (re-run the adversarial check on the changed parts; new CONFIRMED findings go back to the fix stage). Cap: 3 fix passes per task (see VERIFY under Agent Delegation).
@@ -304,18 +302,18 @@ All 5 agents are native opencode subagents, auto-loaded from `.opencode/agents/*
 
 ### Standard Bug-Fix Flow (findings → fixed & verified)
 
-The default pipeline for turning findings into verified fixes — general, applies to any project and any source of findings (log analysis, code review, user reports, test failures, audits). For log-derived findings the discovery phase is handled by the `/process-report-logs` skill; for everything else the chain below IS the standard way to fix bugs. **One agent per finding at every stage; parallelize only across independent findings** (respect the parallel-spawn rules above).
+The default pipeline for turning findings into verified fixes — general, applies to any project and any source of findings (log analysis, code review, user reports, test failures, audits). For log-derived findings the discovery phase follows the log-analysis protocol below (Phase 1-2: analysis agents per log group + synthesis agent; Phase 3: report-back); for everything else the chain below IS the standard way to fix bugs. **One agent per finding at every stage; parallelize only across independent findings** (respect the parallel-spawn rules above).
 
 The chain (each stage consumes the previous stage's reports as PRIOR CONTEXT — pass the report paths, never flattened summaries):
 
-1. **DISCOVER** (only if findings don't exist yet) — one analysis agent per session/source finds the problems and files severity-labeled findings with evidence (file:line, quoted lines). For log packages: the `/process-report-logs` skill's Phase 1-2 (analysis agents per log group + synthesis agent) and Phase 3 report-back run first.
-2. **REVIEW** (one `executor-high`, type `review`, per finding) — locates the exact root cause in source, proposes a MINIMAL surgical fix (5-15 lines, no heavy refactoring), checks test impact. Verdict: **FIXABLE / EXCLUDE** (with justification).
+1. **DISCOVER** (only if findings don't exist yet) — one analysis agent per session/source finds the problems and files severity-labeled findings with evidence (file:line, quoted lines). For log packages: the log-analysis protocol's Phase 1-2 (analysis agents per log group + synthesis agent) and Phase 3 report-back run first.
+2. **REVIEW** (one `executor`, type `review`, per finding) — locates the exact root cause in source, proposes a MINIMAL surgical fix (5-15 lines, no heavy refactoring), checks test impact. Verdict: **FIXABLE / EXCLUDE** (with justification).
    - **Git cross-check (MANDATORY in every review brief):** the finding's area must be checked against commits made since the relevant baseline — for report/log-derived findings: the version stated in the report (locate its "Version updated: X.YYY" commit, then `git log <bump-commit>..HEAD --oneline`); otherwise: the last version bump. If the area was already modified: determine whether the existing change covers the observed case or whether a variant/gap remains. Cite the commits. Regression-awareness rules (Quality Practices) apply.
 3. **ADVERSARIAL** (one `adversarial-reviewer` per finding) — falsifies the review's claims: the root-cause attribution AND the fix proposal (would the fix actually work? does the code already handle the case through another path? does the proposal miss a variant? is it minimal and safe?). Verdicts CONFIRMED / REJECTED / WEAKENED per claim. Only surviving reviews proceed to FIX; REJECTED/WEAKENED findings are dropped or downgraded.
-4. **FIX** (one `executor-high`, type `code`, per FIXABLE finding) — implements exactly the reviewed-and-adversarially-verified fix. WRITABLE FILES = the exact files. Self-verify: py_compile/syntax of changed files, grep affected tests, targeted test run (never the full suite). Report the diff and the verification result.
-5. **POST-FIX REVIEW** (one `executor-high`, type `review`, per fix) — verifies the applied diff against the original fix design: correctness, minimality, new bugs, test breakage, race conditions. Verdict **APPROVED / NEEDS-FIX**.
+4. **FIX** (one `executor`, type `code`, per FIXABLE finding) — implements exactly the reviewed-and-adversarially-verified fix. WRITABLE FILES = the exact files. Self-verify: py_compile/syntax of changed files, grep affected tests, targeted test run (never the full suite). Report the diff and the verification result.
+5. **POST-FIX REVIEW** (one `executor`, type `review`, per fix) — verifies the applied diff against the original fix design: correctness, minimality, new bugs, test breakage, race conditions. Verdict **APPROVED / NEEDS-FIX**.
 6. **POST-FIX ADVERSARIAL** (ONLY if any post-fix review produced MEDIUM+ findings) — one `adversarial-reviewer` per such finding. All clean → skip.
-7. **FINAL FIXES** — apply any confirmed post-fix findings (fresh executor run per finding), then re-review. Report the final picture to the user: finished & skipped issues, verdicts, and (for log-derived bugs) the UI smoke tests per the log-analysis skill.
+7. **FINAL FIXES** — apply any confirmed post-fix findings (fresh executor run per finding), then re-review. Report the final picture to the user: finished & skipped issues, verdicts, and (for log-derived bugs) the UI smoke tests per the log-analysis protocol.
 
 Naming: `s1-review-<id>`, `s1-adv-<id>`, `s1-fix-<id>`, `s1-rereview-<id>`, `s1-postadv-<id>` (report paths must be unique per agent run).
 

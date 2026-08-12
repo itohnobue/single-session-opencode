@@ -1,12 +1,11 @@
-# Agent Directory (5 agents)
+# Agent Directory (4 agents)
 
 Quick selection reference. All workflow instructions live in `AGENTS.md` — the Agent Delegation section (executor tiers T1/T2/T3, second-opinion rules, optional VERIFY block). Read it before delegating.
 
 | File | Agent | Role |
 |------|-------|------|
 | prepare-agent.md | Prepare agent | Research generation per task (T2/T3 only). FOCUS parameter = specialist identity; ≤3 queries per tech; one ≤15KB research-data file (soft max, no minimum); quality self-review before delivery; task-context anchoring + provisional traps. |
-| executor-high.md | Executor agent (HIGH) | Default executor. T1 (plain — task context is the briefing) or T2/T3 (after prepare: template → RESEARCH DATA → task); second-opinion runs (s2) with complementary-FOCUS research briefings. |
-| executor-max.md | Executor agent (MAX) | Same as executor-high, deeper reasoning — use for deep-analysis/investigation research tasks; synthesis and implementation stay on executor-high. |
+| executor.md | Executor agent | The single executor for all tiers and work types (implementation, review, research, second-opinion s2). T1 (plain — task context is the briefing) or T2/T3 (after prepare: template → RESEARCH DATA → task); second-opinion runs (s2) with complementary-FOCUS research briefings. |
 | adversarial-reviewer.md | Adversarial reviewer | Falsification gate — optional VERIFY block (critical issues, acted-on findings, on demand). Falsifies findings (FP → REJECTED, overstated → WEAKENED), challenges rejected-non-bug lists, prioritizes unique findings on merged s2 outputs; CONFIRMED findings drive fix + re-verify (cap 3 passes). |
 | web-searcher.md | Web researcher | Deep-research fallback for the main model when a task needs beyond the prepare budget. |
 

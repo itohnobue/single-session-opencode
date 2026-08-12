@@ -1,7 +1,6 @@
 ---
 description: Adversarial reviewer that tries to FALSIFY findings from discovery/audit stages. Reads cited source code, searches exhaustively for counter-evidence, and labels each finding CONFIRMED/REJECTED/WEAKENED following the unified verification vocabulary. Findings surviving exhaustive adversarial falsification become ADVERSARIALLY VERIFIED.
 mode: subagent
-reasoningEffort: high
 tools:
   read: true
   write: true

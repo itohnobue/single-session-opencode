@@ -34,10 +34,10 @@
 #
 # Examples:
 #   # T1 — Executor plain (no research data; the task file's own context is the briefing)
-#   .opencode/tools/assemble-task.sh -a executor-high -t code -n exec-impl --task tmp/impl-task.txt -o tmp/exec-impl-task-prompt.txt
+#   .opencode/tools/assemble-task.sh -a executor -t code -n exec-impl --task tmp/impl-task.txt -o tmp/exec-impl-task-prompt.txt
 #
 #   # T2/T3 — Executor (researched): template → RESEARCH DATA → task
-#   .opencode/tools/assemble-task.sh -a executor-high -t code -n exec-impl (or -a executor-max for deep analysis/investigation tasks) --task tmp/impl-task.txt --research-file tmp/prepare/impl-research.md -o tmp/exec-impl-task-prompt.txt
+#   .opencode/tools/assemble-task.sh -a executor -t code -n exec-impl --task tmp/impl-task.txt --research-file tmp/prepare/impl-research.md -o tmp/exec-impl-task-prompt.txt
 #
 #   # Prepare phase (research generation, T2/T3 only)
 #   .opencode/tools/assemble-task.sh -a prepare-agent -t prepare -n prepare-impl --task tmp/prepare-impl-task.txt
