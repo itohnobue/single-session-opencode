@@ -59,7 +59,7 @@ No lead. No planning pipeline. No mandated verification stages — verification 
 | Agent | Role |
 |-------|------|
 | `prepare-agent` | Researches a task (T2/T3 runs only): every technology it touches, ≤3 queries per tech, one ≤15KB research-data file. `FOCUS:` parameter defines the specialist identity. |
-| `executor` | Does the work — T1 plain (the task file's own context is the briefing) or T2/T3 after prepare (research data as the briefing). All work types: implementation, review, research, second opinion. |
+| `executor` | Does the work — T1 plain (the task file's own context is the briefing) or T2/T3 after prepare (research data as the briefing). All work types: implementation, review, research, deep analysis. |
 | `adversarial-reviewer` | Falsification gate for the optional VERIFY block — falsifies findings, challenges rejected-non-bug lists, reports CONFIRMED issues. |
 | `web-searcher` | Deep-research fallback when a task needs research beyond the prepare budget. |
 
