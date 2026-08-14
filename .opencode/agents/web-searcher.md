@@ -1,6 +1,7 @@
 ---
 description: Web research specialist. Single command for search + fetch + report.
 mode: subagent
+reasoningEffort: high
 tools:
   bash: true
   read: true

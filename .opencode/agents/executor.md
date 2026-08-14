@@ -1,6 +1,7 @@
 ---
 description: "Executor agent — the single executor for all tiers and work types. T1 runs plain (the task file's context is the briefing, no research); T2/T3 runs come AFTER the prepare agent with a RESEARCH DATA section injected (coordination template → RESEARCH DATA → task). Read the file, use the research data if present as your briefing, execute the task, write the report. No web research of its own."
 mode: subagent
+reasoningEffort: high
 tools:
   read: true
   write: true
