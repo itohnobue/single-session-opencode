@@ -2,6 +2,10 @@
 
 A single-session agent suite for [OpenCode](https://opencode.ai). All work happens in one session with the operator — the model does the work itself, and decides on its own when to call in a subagent. No orchestration pipeline, no lead, no stage machinery. Works with any LLM provider.
 
+## Default allowance
+
+The repo ships with a minimal `opencode.json`: `permission: allow` and **no model pin** — the model and provider come from your machine's global OpenCode config (`~/.config/opencode/opencode.json`). Agent reasoning effort is set per-agent in `.opencode/agents/*.md` (`reasoningEffort: max/high`); the main session uses whatever the default model's options say (typically `max`). Edit `opencode.json` locally if you need a per-machine override — the committed version stays minimal by design.
+
 ## Why use it
 
 - **One session, one worker** — You work with the model directly. It reads, writes, runs commands, and delivers — all in the current session. You can interject or redirect at any moment.
