@@ -45,7 +45,8 @@ What it does:
   1. Checks that OpenCode CLI is installed and in PATH
   2. Copies .opencode/ directory (agents, tools, templates) to your project
   3. Creates AGENTS.md with single-session workflow instructions
-  4. Creates tmp/ directory for agent working files
+  4. Creates opencode.json with default allowance (skipped if one exists)
+  5. Creates tmp/ directory for agent working files
 
 If .opencode/ already exists, suite files are synchronized to the current
 version: .opencode/agents/ is suite-owned (agent definitions not shipped by
@@ -154,7 +155,16 @@ main() {
     info "Created AGENTS.md with single-session workflow instructions"
   fi
 
-  # ── Step 4: tmp/ directory ──
+  # ── Step 4: opencode.json ──
+  step "Setting up opencode.json"
+  if [[ -f "$target/opencode.json" ]]; then
+    warn "opencode.json already exists in target — keeping it (may hold machine-local settings)"
+  else
+    cp "$SCRIPT_DIR/opencode.json" "$target/opencode.json"
+    info "Created opencode.json with default allowance (permission allow, no model pin)"
+  fi
+
+  # ── Step 5: tmp/ directory ──
   step "Creating tmp/ directory"
   mkdir -p "$target/tmp"
   info "Created tmp/ for agent working files"
@@ -172,6 +182,7 @@ main() {
   printf '    .opencode/tools/      Research & memory tools\n'
   printf '    .opencode/templates/  Agent prompt boilerplate\n'
   printf '    AGENTS.md             Single-session workflow instructions\n'
+  printf '    opencode.json         Default allowance (permission allow, no model pin)\n'
   printf '    tmp/                  Agent working directory\n'
   printf '\n'
   printf '  %sUsage:%s\n' "$BOLD" "$RESET"

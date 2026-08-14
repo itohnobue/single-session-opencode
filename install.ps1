@@ -57,7 +57,8 @@ What it does:
   1. Checks that OpenCode CLI is installed and in PATH
   2. Copies .opencode\ directory (agents, tools, templates) to your project
   3. Creates AGENTS.md with single-session workflow instructions
-  4. Creates tmp\ directory for agent working files
+  4. Creates opencode.json with default allowance (skipped if one exists)
+  5. Creates tmp\ directory for agent working files
 
 If .opencode\ already exists, suite files are synchronized to the current
 version: .opencode\agents\ is suite-owned (agent definitions not shipped by
@@ -173,7 +174,18 @@ function Main {
         Write-Info "Created AGENTS.md with single-session workflow instructions"
     }
 
-    # -- Step 4: tmp\ directory --
+    # -- Step 4: opencode.json --
+    Write-Step "Setting up opencode.json"
+    $opencodeJson = Join-Path $Target "opencode.json"
+    $srcOpencodeJson = Join-Path $ScriptDir "opencode.json"
+    if (Test-Path $opencodeJson) {
+        Write-Warn "opencode.json already exists in target - keeping it (may hold machine-local settings)"
+    } else {
+        Copy-Item -Path $srcOpencodeJson -Destination $opencodeJson
+        Write-Info "Created opencode.json with default allowance (permission allow, no model pin)"
+    }
+
+    # -- Step 5: tmp\ directory --
     Write-Step "Creating tmp\ directory"
     $tmpDir = Join-Path $Target "tmp"
     if (-not (Test-Path $tmpDir)) {
@@ -196,6 +208,7 @@ function Main {
     Write-Host "    .opencode\tools\      Research & memory tools"
     Write-Host "    .opencode\templates\  Agent prompt boilerplate"
     Write-Host "    AGENTS.md             Single-session workflow instructions"
+    Write-Host "    opencode.json         Default allowance (permission allow, no model pin)"
     Write-Host "    tmp\                  Agent working directory"
     Write-Host ""
     Write-Host "  Usage:" -ForegroundColor White
