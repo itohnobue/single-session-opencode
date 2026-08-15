@@ -10,7 +10,7 @@ The repo ships with a minimal `opencode.json`: `permission: allow` and **no mode
 
 - **One session, one worker** — You work with the model directly. It reads, writes, runs commands, and delivers — all in the current session. You can interject or redirect at any moment.
 - **Tiered executor pipeline** — 4 lean agents instead of a wall of static specialists, governed by one context rule: plain execution (T1) when the task file already carries rich context; researched execution (T2) when the file is thin and needs current external facts — `prepare-agent` researches them into one research-data file, an executor does the work with that briefing; second-opinion runs (T3) pair a context-rule primary with a complementary-FOCUS research-backed second opinion. Specialist identity comes from the research data, not from canned `.md` personas — fresher and per-task.
-- **Web research when needed** — When the answer depends on external facts the model isn't sure of — specs, docs, APIs, best practices, recent changes — it researches via `web_search.sh` instead of guessing. Stable, well-known facts come from memory; no mandatory search on every question.
+- **Search-first for external facts** — When the answer depends on external facts — specs, docs, APIs, best practices, recent changes — the model defaults to a quick `web_search.sh` even when it mostly knows the answer. Memory-only is the exception: facts already in the task file or trivially stable ones.
 - **Memory that survives** — Two-tier knowledge/session memory via `memory.sh`. Facts learned this session are available next session.
 - **Everything included** — Agents, tools, templates, install scripts. Copy the suite into any project with one command.
 
@@ -34,7 +34,7 @@ You ask: "Add dark mode" or "What's the best way to store these tokens?"
     Direct work    The model does the work itself: reads code, writes
          │         code, runs commands, verifies results
          ▼
-    [Research?]    Needs external info the model isn't sure of?
+    [Research?]    Depends on external facts?
           │         It runs web_search.sh — facts, versions, docs.
           │         Doesn't guess what it can check
          ▼
@@ -69,7 +69,7 @@ No lead. No planning pipeline. No mandated verification stages — verification 
 
 **Delegation** — The model solves simple and medium work itself, and applies one context rule when delegating: **plain** when the task file already carries rich context (T1 — specs, contracts, and expected behaviors stated in PRIOR CONTEXT), **researched** when the file is thin and depends on current external facts (T2 — `prepare-agent` researches → `assemble-task.sh` injects the research into the task prompt: template → RESEARCH DATA → task → the executor does the work). Findings/analysis tasks at MEDIUM+ get a **second opinion** (T3): a context-rule primary plus a complementary-FOCUS research-backed second run — results are always merged, never replaced. The optional **VERIFY block** — reviewer → ONE adversarial check per block → fix → re-verify, one block per issue, capped at 3 fix passes per issue; if the review produces no MEDIUM+ findings, verification ends — runs for critical/high-risk work, acted-on findings, or on demand. No mandatory pipeline — delegation is the model's judgment call.
 
-**Web research when needed** — When the answer depends on external facts the model isn't sure of, it runs `./.opencode/tools/web_search.sh "query"` (or `web_search.bat` on Windows) instead of guessing: facts, versions, API contracts, docs, alternatives, breaking changes. Stable or already-known facts are answered from memory — searching is the fix for uncertainty, not a mandatory step on every question. For deep multi-query research the model may delegate to the `web-searcher` agent instead.
+**Search-first for external facts** — When the answer depends on external facts — versions, API contracts, docs, alternatives, breaking changes — the model runs a quick `./.opencode/tools/web_search.sh "query"` (or `web_search.bat` on Windows) as the default, even when it mostly knows the answer: the tool is cheap, and guessing verifiable facts is the failure mode. Memory-only is the exception for facts already in the task file or trivially stable. For deep multi-query research the model may delegate to the `web-searcher` agent instead.
 
 **Memory** — `memory.sh` (or `memory.bat` on Windows) provides two tiers: **knowledge** (permanent facts: architecture, gotchas, patterns, configs) and **session** (current task state: todos, progress, blockers). Facts learned this session persist across sessions and machines.
 

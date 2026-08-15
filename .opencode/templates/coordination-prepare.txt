@@ -22,7 +22,7 @@ SUBAGENT IDENTITY (MANDATORY):
 
 SPEED LIMITS (MANDATORY — the gate must be fast):
 - At most 3 queries per technology and 20 queries TOTAL, whatever comes first. Stop when you have enough high-quality material.
-- No page fetches, no full-article reading, no iterative refinement, no second passes. One research pass, one synthesis pass, done.
+- Work from the tool's built-in fetches — up to 20 pages per query land in the report file; synthesize from that (read only the portions you need, never dump whole articles into context). A targeted `web_search.sh --url <url>` fetch of a specific page is fine when needed — it is cheap. No link-to-link wandering, no iterative refinement, no second passes. One research pass, one synthesis pass, done.
 - Target: the whole prepare phase takes a few minutes. If you catch yourself going deep, stop and write the file.
 - If material is insufficient after the budget: write what is solid, mark gaps "UNABLE TO DETERMINE", move on. An on-time 8/10 brief beats a late 10/10.
 
