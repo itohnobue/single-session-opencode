@@ -9,7 +9,7 @@ The repo ships with a minimal `opencode.json`: `permission: allow` and **no mode
 ## Why use it
 
 - **One session, one worker** — You work with the model directly. It reads, writes, runs commands, and delivers — all in the current session. You can interject or redirect at any moment.
-- **Tiered executor pipeline** — 8 lean agents instead of a wall of static specialists, governed by one context rule: plain execution (T1) when the task file already carries rich context; researched execution (T2) when the file is thin and needs current external facts — `prepare-agent` researches them into one research-data file, an executor does the work with that briefing; second-opinion runs (T3) pair a context-rule primary with a complementary-FOCUS research-backed second opinion. Specialist identity comes from the research data, not from canned `.md` personas — fresher and per-task.
+- **Research-backed executor pipeline** — 8 lean agents instead of a wall of static specialists, governed by one context rule: plain execution when the task file already carries rich context; researched execution when the file is thin and needs current external facts — `prepare-agent` researches them into a full research report + compact digest (or the model curates its own), an executor does the work with that briefing; second-opinion runs pair a context-rule primary with a complementary-FOCUS research-backed second opinion. Research data (digest + full report) is a general input to any executor run — something valuable and big to give an agent gets injected via that scheme. Specialist identity comes from the research data, not from canned `.md` personas — fresher and per-task.
 - **Search-first for external facts** — When the answer depends on external facts — specs, docs, APIs, best practices, recent changes — the model defaults to a quick `web_search.sh` even when it mostly knows the answer. Memory-only is the exception: facts already in the task file or trivially stable ones.
 - **Memory that survives** — Two-tier knowledge/session memory via `memory.sh`. Facts learned this session are available next session.
 - **Everything included** — Agents, tools, templates, install scripts. Copy the suite into any project with one command.
@@ -40,10 +40,11 @@ You ask: "Add dark mode" or "What's the best way to store these tokens?"
          ▼
     [Delegate?]    Big/heavy or context-hungry work, or a task that
          │         touches current external facts? The model runs the
-         │         tiered pipeline — T1 plain (the task's own context
-         │         is the briefing), T2 researched (prepare-agent
-         │         researches → executor works with the briefing),
-         │         T3 second opinion. Otherwise works directly
+         │         research-backed pipeline — plain (the task's own context
+         │         is the briefing), researched (prepare-agent research or
+         │         the model's own curated digest + full report → executor
+         │         works with the briefing), second opinion. Otherwise
+         │         works directly
          ▼
      Delivered     Results, reports, and findings in the session;
          │         discoveries saved to memory; tmp/ cleaned
@@ -62,8 +63,8 @@ No lead. No planning pipeline. No mandated verification stages — verification 
 
 | Agent | Role |
 |-------|------|
-| `prepare-agent` | Researches a task (T2/T3 runs only): every technology it touches, ≤3 queries per tech, one ≤15KB research-data file. `FOCUS:` parameter defines the specialist identity. |
-| `executor` | Does the work — T1 plain (the task file's own context is the briefing) or T2/T3 after prepare (research data as the briefing). All work types: implementation, review, research, deep analysis. |
+| `prepare-agent` | Researches a task when fresh web research is needed: every technology it touches, ≤3 queries per tech, full research report (no size cap) + compact digest (~10KB) the executor prompt carries. `FOCUS:` parameter defines the specialist identity. |
+| `executor` | Does the work — plain (the task file's own context is the briefing) or with a research briefing (research data as the briefing). All work types: implementation, review, research, deep analysis. |
 | `verification-analyst` | Extraction + synthesis + knowledge harvesting for findings-heavy flows — dedups/tags findings, routes investigated-and-rejected items into adversarial batches, compiles the synthesis grid, harvests patterns into knowledge. |
 | `adversarial-reviewer-max` | Falsification gate (MAX effort) for CRITICAL (1:1) and HIGH (1:3) finding batches — falsifies findings, challenges rejected-non-bug lists, reports CONFIRMED issues. |
 | `adversarial-reviewer-high` | Falsification gate (HIGH effort) for MEDIUM (1:10) finding batches — same methodology and verdict contract as MAX. |
@@ -71,13 +72,13 @@ No lead. No planning pipeline. No mandated verification stages — verification 
 | `research-analyst` | Structured multi-source research — tech comparisons, literature reviews, market research. |
 | `data-researcher` | Dataset research — data discovery, collection, quality assessment, pattern mining. |
 
-**Delegation** — The model solves simple and medium work itself, and applies one context rule when delegating: **plain** when the task file already carries rich context (T1 — specs, contracts, and expected behaviors stated in PRIOR CONTEXT), **researched** when the file is thin and depends on current external facts (T2 — `prepare-agent` researches → `assemble-task.sh` injects the research into the task prompt: template → RESEARCH DATA → task → the executor does the work). Findings/analysis tasks at MEDIUM+ get a **second opinion** (T3): a context-rule primary plus a complementary-FOCUS research-backed second run — results are always merged, never replaced. The optional **VERIFY block** — reviewer → ONE adversarial check per block → fix → re-verify, one block per issue; fix passes continue while the re-verify grid contains CONFIRMED HIGH+ findings and converge on a pass with zero CONFIRMED HIGH+ (convergence rule); if the review produces no MEDIUM+ findings, verification ends — runs for critical/high-risk work, acted-on findings, or on demand. No mandatory pipeline — delegation is the model's judgment call.
+**Delegation** — The model solves simple and medium work itself, and applies one context rule when delegating: **plain** when the task file already carries rich context (specs, contracts, and expected behaviors stated in PRIOR CONTEXT), **researched** when the file is thin and depends on current external facts (`prepare-agent` researches → `assemble-task.sh` injects the research into the task prompt: template → RESEARCH DATA → task → the executor does the work; the main model may also curate and inject its own research directly, same digest + full report scheme — the scheme is a general input to any executor run). Findings/analysis tasks at MEDIUM+ get a **second opinion**: a context-rule primary plus a complementary-FOCUS research-backed second run — results are always merged, never replaced. The optional **VERIFY block** — reviewer → ONE adversarial check per block → fix → re-verify, one block per issue; fix passes continue while the re-verify grid contains CONFIRMED HIGH+ findings and converge on a pass with zero CONFIRMED HIGH+ (convergence rule); if the review produces no MEDIUM+ findings, verification ends — runs for critical/high-risk work, acted-on findings, or on demand. No mandatory pipeline — delegation is the model's judgment call.
 
 **Search-first for external facts** — When the answer depends on external facts — versions, API contracts, docs, alternatives, breaking changes — the model runs a quick `./.opencode/tools/web_search.sh "query"` (or `web_search.bat` on Windows) as the default, even when it mostly knows the answer: the tool is cheap, and guessing verifiable facts is the failure mode. Memory-only is the exception for facts already in the task file or trivially stable. For deep multi-query research the model may delegate to the matching research agent (`web-searcher` / `research-analyst` / `data-researcher`) instead.
 
 **Memory** — `memory.sh` (or `memory.bat` on Windows) provides two tiers: **knowledge** (permanent facts: architecture, gotchas, patterns, configs) and **session** (current task state: todos, progress, blockers). Facts learned this session persist across sessions and machines.
 
-**Temporary files** — Reports, logs, and task prompts go to `tmp/` relative to the repository root. Task prompts are assembled with `assemble-task.sh`, which injects absolute paths automatically.
+**Temporary files** — Reports, logs, and task prompts go to `tmp/` relative to the repository root. Task prompts are assembled with `assemble-task.sh`, which injects absolute paths automatically. **Research briefings** follow the digest + full report scheme: the executor's prompt carries only a compact digest (~10KB soft max) plus a `FULL RESEARCH REPORT:` path; the full briefing file (`tmp/prepare/<slug>-research.md` or `tmp/<name>-report.md`) is consulted on demand — whatever its producer (prepare agent or the model's own curation).
 
 ## Requirements
 
