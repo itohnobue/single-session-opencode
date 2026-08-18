@@ -21,7 +21,7 @@ The shipped `opencode.json` sets only `permission: allow` — **no model pin**: 
 
 - **One session, one worker** — the model reads, writes, runs, and verifies, all in dialog with you. You can interject or redirect at any moment.
 - **Search-first** — when the answer depends on external facts (versions, APIs, docs), the model runs `web_search.sh` instead of guessing. Memory-only answers are the exception.
-- **Research-backed delegation** — big/heavy/context-hungry work goes to subagents: `prepare-agent` researches a task's technologies into a full research report + compact digest, an executor does the work with that briefing (the model may also inject its own research directly — same digest + full report scheme, a general input to any executor run). Findings work at MEDIUM+ gets a research-backed second opinion; critical work gets the optional VERIFY block (review → adversarial check → fix → re-verify). Delegation is judgment, not a pipeline.
+- **Tiered delegation** — big/heavy/context-hungry work goes to subagents in three tiers: **T1** plain executor (task context is the briefing — no research; use when research is not needed), **T2** researched executor (`prepare-agent` researches a task's technologies into a full research report + compact digest), **T3** the full workflow for any complex issue (review agents gather research + discovery + review → research-backed second opinion at MEDIUM+ → adversarial verification → fixes). Delegation is judgment, not a pipeline.
 - **Memory that survives** — two-tier knowledge/session memory via `memory.sh`.
 
 ## The 8 agents
@@ -31,7 +31,7 @@ The shipped `opencode.json` sets only `permission: allow` — **no model pin**: 
 | Agent | Role |
 |-------|------|
 | `prepare-agent` | Web-researches a task's technologies (≤3 queries per tech), curates a full research report (no size cap) + compact digest (~10KB) the executor prompt carries. `FOCUS:` defines the specialist identity. |
-| `executor` | Does the work — plain (task context as briefing) or with a research briefing. All work types: implementation, review, research, deep analysis. |
+| `executor` | Does the work — T1 plain (task context as briefing, no research) or T2/T3 with a research briefing. All work types: implementation, review, research, deep analysis. |
 | `verification-analyst` | Extraction/synthesis/knowledge-harvesting for findings-heavy flows — dedup, tagging, synthesis grid. |
 | `adversarial-reviewer-max` | Falsification gate (MAX effort) — CRITICAL (1:1) and HIGH (1:3) finding batches. |
 | `adversarial-reviewer-high` | Falsification gate (HIGH effort) — MEDIUM (1:10) finding batches. |

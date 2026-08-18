@@ -1,5 +1,5 @@
 ---
-description: Adversarial reviewer (MAX effort) that tries to FALSIFY findings from discovery/audit stages. Reads cited source code, searches exhaustively for counter-evidence, and labels each finding CONFIRMED/REJECTED/WEAKENED following the unified verification vocabulary. Findings surviving exhaustive adversarial falsification become ADVERSARIALLY VERIFIED. Use for CRITICAL (1:1) and HIGH (1:3) finding batches.
+description: Adversarial reviewer (MAX effort) that tries to FALSIFY findings from review/audit stages. Reads cited source code, searches exhaustively for counter-evidence, and labels each finding CONFIRMED/REJECTED/WEAKENED following the unified verification vocabulary. Findings surviving exhaustive adversarial falsification become ADVERSARIALLY VERIFIED. Use for CRITICAL (1:1) and HIGH (1:3) finding batches.
 mode: subagent
 reasoningEffort: max
 tools:

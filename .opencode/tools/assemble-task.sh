@@ -20,8 +20,8 @@
 #                     PRIOR CONTEXT, YOUR TASK, WRITABLE FILES — main-model-written)
 #   --research-file   Path to the briefing DIGEST — produced by the prepare agent OR
 #                     curated by the main model from its own research — injected as the
-#                     `## RESEARCH DATA` section between template and task (any run;
-#                     omit when the task file's own context is the briefing)
+#                     `## RESEARCH DATA` section between template and task (T2/T3 runs;
+#                     omit for T1 when the task file's own context is the briefing)
 #   --research-report Path to the briefing's full report file (no size cap; same producers
 #                     as --research-file) — an authoritative `FULL RESEARCH REPORT:` path
 #                     line is printed under the digest header; the executor reads/greps the
@@ -38,16 +38,16 @@
 #   ASSEMBLED|name|output_path|bytes
 #
 # Examples:
-#   # Executor plain (no research data; the task file's own context is the briefing)
+#   # Executor T1 (plain, no research data; the task file's own context is the briefing)
 #   .opencode/tools/assemble-task.sh -a executor -t code -n exec-impl --task tmp/impl-task.txt -o tmp/exec-impl-task-prompt.txt
 #
-#   # Executor (researched): template → RESEARCH DATA (digest) → task
+#   # Executor T2/T3 (researched): template → RESEARCH DATA (digest) → task
 #   .opencode/tools/assemble-task.sh -a executor -t code -n exec-impl --task tmp/impl-task.txt --research-file tmp/prepare/impl-digest.md --research-report tmp/prepare/impl-research.md -o tmp/exec-impl-task-prompt.txt
 #
 #   # Prepare phase (research generation)
 #   .opencode/tools/assemble-task.sh -a prepare-agent -t prepare -n prepare-impl --task tmp/prepare-impl-task.txt
 #
-#   # Second opinion: primary per the context rule + research-backed s2 (one prepare, complementary FOCUS) + one s2 executor
+#   # Second opinion (T3): primary + research-backed s2 (one prepare, complementary FOCUS) + one s2 executor
 
 set -euo pipefail
 
