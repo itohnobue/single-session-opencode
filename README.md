@@ -32,9 +32,9 @@ The shipped `opencode.json` sets only `permission: allow` — **no model pin**: 
 |-------|------|
 | `prepare-agent` | Web-researches a task's technologies (≤3 queries per tech), curates a full research report (no size cap) + compact digest (~10KB) the executor prompt carries. `FOCUS:` defines the specialist identity. |
 | `executor` | Does the work — T1 plain (task context as briefing, no research) or T2/T3 with a research briefing. All work types: implementation, review, research, deep analysis. |
+| `postfix-reviewer` | Post-fix review ONLY (always MAX effort, read-only) — verifies applied fixes against their design; verdict APPROVED / NEEDS-FIX. |
 | `verification-analyst` | Extraction/synthesis/knowledge-harvesting for findings-heavy flows — dedup, tagging, synthesis grid. |
-| `adversarial-reviewer-max` | Falsification gate (MAX effort) — CRITICAL (1:1) and HIGH (1:3) finding batches. |
-| `adversarial-reviewer-high` | Falsification gate (HIGH effort) — MEDIUM (1:10) finding batches. |
+| `adversarial-reviewer` | Falsification gate (always MAX effort) — the single distinct quality gate; batch sizes CRITICAL (1:1), HIGH (1:3), MEDIUM (1:10) are volume controls. |
 | `web-searcher` | Deep-research fallback — internet research (standards, versions, ecosystems, advisories). |
 | `research-analyst` | Structured multi-source research — tech comparisons, literature reviews, market research. |
 | `data-researcher` | Dataset research — discovery, collection, quality assessment. |
