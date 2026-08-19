@@ -42,6 +42,11 @@ Your report MUST go to your working directory (see the exact path in
 WRITABLE FILES at the bottom of this prompt). Do NOT write reports to the PROJECT
 directory — that directory is for reading source files only.
 
+REVIEW DIMENSIONS (MANDATORY — verify against the task brief, not just what exists):
+1. **Completeness** — enumerate every promised deliverable/requirement from the task brief BEFORE reading the code, then verify each. Any brief-listed item absent from the deliverable is a finding (HIGH — "brief promised X; not found"). Absence is never found by reading code alone — it must be sought against the brief.
+2. **Correctness** — verify the brief's claims against the deliverable with file:line evidence; positive confirmations go in MUST ANSWER responses, divergence becomes findings (as below).
+3. **Coherence** — every stated decision/approach in the brief (not style) checked against the deliverable; a deviation is a finding (WARNING unless it has functional impact, then HIGH). Where the brief states no approach, this dimension yields nothing — say so.
+
 REPORT FORMAT:
 ## [Subject]
 ### Summary

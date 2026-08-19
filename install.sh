@@ -122,7 +122,7 @@ main() {
       fi
     done
     # Copy all suite files, overwriting previous versions (agents, templates,
-    # tools, completions). User-created files outside the suite are kept.
+    # tools). User-created files outside the suite are kept.
     cp -R "$SCRIPT_DIR/.opencode/." "$target/.opencode/"
     info "Synchronized .opencode/ to the current suite version"
   else

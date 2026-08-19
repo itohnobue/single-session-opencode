@@ -140,7 +140,7 @@ function Main {
         }
 
         # Copy all suite files, overwriting previous versions (agents, templates,
-        # tools, completions). User-created files outside the suite are kept.
+        # tools). User-created files outside the suite are kept.
         Copy-Item -Path (Join-Path $srcOpencode "*") -Destination $opencodeDir -Recurse -Force
         Write-Info "Synchronized .opencode\ to the current suite version"
     } else {
