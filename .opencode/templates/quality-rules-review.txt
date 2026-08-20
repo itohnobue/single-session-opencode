@@ -50,7 +50,7 @@ Bash:
 - Routine commands (ls, pwd, which, git status, echo): output is short, use as-is.
 - Build/test/lint: save full output to a temp file, show only the summary. Include pass/fail counts and any warnings. On failure, also include all failure details and the last 40 lines. If you need the raw output later, read it from the saved file.
 - Install commands (pip, npm, cmake): keep the last 15 lines + any errors.
-- Diagnostic/investigative commands: use `2>&1 | tail -40`. If you need the full output, read it from the saved file.
+- Diagnostic/investigative commands: use `2>&1 | tail -40`. If you need the full output, read it from the saved file. EXCEPTION: never trim `web_search.sh` output — its digest is small by design and carries the report path; consume it fully (see the tool's digest rules).
 
 Re-reading files:
 - Avoid re-reading files you already read this session. Trust what you already saw.

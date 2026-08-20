@@ -9,6 +9,8 @@ tools:
   bash: true
   grep: true
   glob: true
+  websearch: false
+  webfetch: false
 permission:
   edit: deny
   bash:
@@ -25,7 +27,7 @@ Read ALL reports from the stage and:
 
 1. **Extract every finding** — file:line, severity, description. Preserve the severity the reporting agent filed — do not re-rate by your own judgment.
 2. **Deduplicate** — same file:line + same issue → merge into one finding, noting both sources.
-3. **Classify by severity** and split into batches grouped by domain. Routing: CRITICAL → adversarial 1:1; HIGH → adversarial 1 per batch of 3; MEDIUM → adversarial 1 per batch of 10 — record the actual batch sizes used in the extraction report; after 2 runs the MEDIUM ratio reverts to 1:8 if the CONFIRMED yield drops; **LOW → DROPPED** (recorded as dropped in the extraction report — one line per dropped finding — no adversarial batch, no grid entry; only MEDIUM+ findings are processed).
+3. **Classify by severity** and split into batches grouped by domain. Routing: CRITICAL → adversarial 1:1; HIGH → adversarial 1 per batch of 3; MEDIUM → adversarial 1 per batch of 10 — record the actual batch sizes used in the extraction report; **LOW → DROPPED** (recorded as dropped in the extraction report — one line per dropped finding — no adversarial batch, no grid entry; only MEDIUM+ findings are processed).
 4. **Tag confidence signals:**
    - When the originating stage used a second opinion (s2): tag each finding "both-found" (both agents reported independently) or "single-found" (one agent only). Both-found signals cross-agent agreement and carries elevated confidence. Surface all tags in synthesis.
 5. **Route investigated-and-rejected items (MANDATORY)** — collect each report's `### Investigated-and-Rejected` section (dismissed items with reasoning + file:line) and route them into the adversarial batches as RE-EXAMINE items (labeled CONFIRMED / WEAKENED / REJECTED like findings). Dismissals at HIGH/CRITICAL claim severity are always re-examined; MEDIUM dismissals batch with findings; LOW dismissals are dropped like LOW findings. Dismissals are NOT trusted — executors have dismissed real bugs.

@@ -9,6 +9,8 @@ tools:
   bash: true
   grep: true
   glob: true
+  websearch: false
+  webfetch: false
 permission:
   edit: deny
   bash:
