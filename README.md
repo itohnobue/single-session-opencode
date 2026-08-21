@@ -38,7 +38,7 @@ The shipped `opencode.json` sets only `permission: allow` — **no model pin**: 
 | `postfix-reviewer` | Post-fix review ONLY (always MAX effort, read-only) — verifies applied fixes against their design; verdict APPROVED / NEEDS-FIX. |
 | `verification-analyst` | Extraction + synthesis only for findings-heavy flows — dedup, tagging, synthesis grid (knowledge harvesting is the main model's job, in-session). |
 | `adversarial-reviewer` | Falsification gate (always MAX effort) — the single distinct quality gate; batch sizes CRITICAL (1:1), HIGH (1:3), MEDIUM (1:10) are volume controls. |
-| `web-searcher` | Internet research (standards, formats, versions, ecosystems, advisories) — the default for internet-research tasks; quick lookups happen in-session. |
+| `web-searcher` | Internet research (standards, formats, versions, ecosystems, advisories) — for substantial research; quick lookups happen in-session with `web_search.sh` (the default). |
 | `research-analyst` | Structured multi-source research — tech comparisons, literature reviews, market research. |
 | `data-researcher` | Dataset research — discovery, collection, quality assessment. |
 
