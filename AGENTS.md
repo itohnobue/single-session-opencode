@@ -16,6 +16,9 @@ This is useful for storing intermediate results, reports, or data during multi-s
 
 **Path resolution:** All `tmp/` paths resolve to `$REPO_ROOT/tmp/` where `$REPO_ROOT` is the absolute path to the repository root (the directory where `opencode` was launched). Always reference `tmp/` paths relative to `$REPO_ROOT`.
 
+`tmp/uv/` is reserved for the local uv installation (tool-use policy R3).
+Cleanup never touches it; it is not a tmp/ scratch area.
+
 ---
 ## Agents
 
@@ -433,6 +436,65 @@ When working on a codebase with git history: before assuming a problem is new, c
 
 ---
 
+## Tool-use policy: bash vs Python
+
+Priority: dedicated tool → bash one-liner → uv run script.
+Unsure between bash and script → script. A dedicated tool always wins.
+
+R1. Dedicated tools first
+  File I/O: read / write / edit / grep / glob tools. Bash search only when
+  the Grep tool can't express it (counts, -o extraction) → then `rg`;
+  anything beyond that → script.
+
+R2. Bash allowed when the shell IS the interface
+  - git, docker, ssh, launchctl, package managers, test/build runners,
+    gh, date, ls, git status / docker ps, running apps/servers, tail -f
+  - workflow scripts (memory.sh, web_search.sh, assemble-task.sh);
+    skill operations via the skill tool
+  - plain single-file fs ops with simple names: one mv/cp/rm/mkdir
+    (no globs, no patterns, no shell-metadata in names)
+  - read-only selection chains over command output only:
+    filter | sort | head/tail | wc  (NOT file reads — those are R1/Read)
+
+R3. Python — always via uv; no global pip installs, no repo venvs
+  deps live only in uv's ephemeral env; uv may use a suitable system
+  interpreter as base (managed Python is downloaded when required)
+  - one script per tmp/ file; PEP 723 inline metadata (# /// script:
+    requires-python, dependencies) → `uv run file.py` is self-contained
+  - ad-hoc deps: `uv run --with <pkg> file.py`; always `--no-project`
+    so a stray pyproject.toml can never switch to project mode
+  - uv lives at $REPO_ROOT/tmp/uv/ (bootstrap once: UV_INSTALL_DIR +
+    UV_NO_MODIFY_PATH) — never ~/.local/bin, never profile edits
+  - before a parallel agent fan-out, ensure uv is already installed
+    (`tmp/uv/uv --version`); never let parallel subagents bootstrap it
+    simultaneously — first-install races can corrupt the binary
+  - cross-platform reads: binary or newline='', explicit ordering
+  Use a script when ANY holds:
+  (a) quoting exposure: spaces, quotes, $, backticks, globs, unicode,
+      user/untrusted data → argv/file only, never shell interpolation
+  (b) data transform: parse, aggregate, extract fields, regex into values,
+      rewrite across ≥2 files; fs ops across multiple files or with
+      patterns (bash stays for selection only)
+  (c) re-runnable / stateful / checks & gates / would run twice
+  (d) must behave identical on macOS/Windows/vespa-linux
+  (e) needs validation: error messages, invariant checks
+
+R4. IMPORTANT — two strikes, then escalate
+  An ad-hoc bash command failing on shell semantics (quoting, escaping,
+  globbing, bad option, portability) → do NOT retry bash. Write the R3
+  script now. Same failure class twice = violation; no third attempt.
+  NOT strikes: service/process/network/tool failures (docker daemon down,
+  registry hiccup, test infra) — route those per Error Handling instead.
+  (Repo workflow tools: their failures go to the Error Handling path —
+  diagnose, fix, respawn, max 3 — they are not rewritten on the spot.)
+
+R5. Output discipline
+  Scripts print compact results; long output → file; one progress line
+  per step only if runtime > 1 min.
+
+R6. Anti-over-engineering
+  No script for one thing a dedicated tool or one trivial command does.
+
 ## Error Handling
 
 | Scenario | Action |
@@ -447,5 +509,8 @@ When working on a codebase with git history: before assuming a problem is new, c
 ## Delivery
 
 - Write final results to the user in the session — summaries, reports, files changed, severity-labeled findings
-- Clean up temporary task files: `rm -f tmp/*-task-prompt.txt tmp/*-task.txt` (keep reports, logs, memory)
+- Clean up temporary task files: `rm -f tmp/*-task-prompt.txt tmp/*-task.txt`
+  (keep reports, logs, memory; NEVER delete tmp/uv/ — it's the locally
+  installed uv binary per the tool-use policy; removing it forces a
+  ~30 MB re-download on the next use)
 - Save non-trivial discoveries to knowledge and task state to session — after serious work, run the **Knowledge Harvesting step** (see Memory System); track current task state via `memory.sh session add`

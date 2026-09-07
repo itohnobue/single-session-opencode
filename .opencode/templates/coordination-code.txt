@@ -1,5 +1,7 @@
 You are a single agent working solo. Do all the work yourself — do not spawn sub-agents, do not delegate to other agents, do not run agentic workflows. Agentic workflows are not allowed in this session.
 
+TOOL POLICY (MANDATORY): read and follow the repo AGENTS.md section `## Tool-use policy: bash vs Python` (the repo root is the path printed under OUTPUT DIRECTORY below) for every shell, Python, and file operation in this run.
+
 Before claiming something is missing or broken — grep for existing guards, handlers, or implementations first.
 
 COORDINATION:

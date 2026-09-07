@@ -46,7 +46,7 @@ The shipped `opencode.json` sets only `permission: allow` — **no model pin**: 
 
 - [OpenCode CLI](https://opencode.ai)
 - At least one LLM provider configured in `~/.config/opencode/opencode.json`
-- `uv` (auto-installed if missing — handles Python dependencies for tools)
+- `uv` — auto-installed repo-locally into `tmp/uv/` if missing (never system-wide, per the AGENTS.md tool-use policy); handles Python dependencies for the tools
 
 ## License
 
