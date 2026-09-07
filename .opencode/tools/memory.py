@@ -4,11 +4,12 @@
 # dependencies = ["rank-bm25>=0.2.2"]
 # ///
 """
-Model Memory Tool v5.2.0 - Multi-Signal Retrieval Edition
+Model Memory Tool v5.3.0 - Multi-Signal Retrieval Edition
 
 A simple, focused persistent memory system for OpenCode.
 Session isolation for parallel work. Multi-signal retrieval:
-keyword scoring fused with BM25 (reciprocal rank fusion).
+keyword scoring fused with BM25 (reciprocal rank fusion) with a
+camelCase-aware tokenizer.
 
 Features:
 - Long-term knowledge storage in knowledge.md
@@ -17,6 +18,8 @@ Features:
 - Automatic session recovery after context compaction
 - Multi-signal search: keyword scoring + BM25, fused by RRF
   (falls back to keyword-only if rank-bm25 is unavailable)
+- camelCase-aware BM25 tokenizer (CancellationError -> cancellation, error)
+- Recall echo on search ("Recalled N of M memories")
 
 Usage:
     memory.sh add <category> <content> [--tags tag1,tag2]
@@ -63,7 +66,7 @@ if sys.platform == "win32" and hasattr(sys.stdout, "buffer"):
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
-__version__ = "5.2.0"
+__version__ = "5.3.0"
 
 
 # =============================================================================
@@ -341,28 +344,41 @@ def write_session_file(entries: list[SessionEntry]) -> None:
 # SEARCH
 # =============================================================================
 
-def _tokenize_for_bm25(text: str) -> list[str]:
-    """Tokenize + light morphological folding for BM25 input.
+def _split_camel(text: str) -> str:
+    """Split camelCase/PascalCase compounds into words.
 
-    Naive suffix stripping (ing/es/s/ed) folds word forms consistently on both
-    the corpus and the query side ('services' -> 'service', 'restarting' ->
-    'restart'), widening the lexical match surface without full stemming.
+    'cancellationError' -> 'cancellation Error', 'fetchOlderMessages' ->
+    'fetch Older Messages'. Acronym runs stay intact ('HTTPPort' unchanged).
+    Applied before suffix folding so each compound word part is a real
+    matchable token (both corpus and query side go through the same path).
+    """
+    return re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", text)
+
+
+def _tokenize_for_bm25(text: str) -> list[str]:
+    """Tokenize + split compounds + light morphological folding for BM25.
+
+    CamelCase splitting makes single-token compounds ('CancellationError',
+    'fetchOlderMessages') match like multi-word phrases. Naive suffix
+    stripping (ing/es/s/ed) folds word forms consistently on both corpus and
+    query side ('services' -> 'service', 'restarting' -> 'restart').
     Guards: never strip 'us'/'ss' words, keep stems >= 4 chars.
     """
     tokens: list[str] = []
     for w in re.findall(r"\w+", text):
-        w = w.lower()
-        if w in STOP_WORDS:
-            continue
-        if len(w) > 5 and w.endswith("ing"):
-            w = w[:-3]
-        elif len(w) > 6 and w.endswith("ed") and len(w) - 2 >= 4:
-            w = w[:-2]
-        elif len(w) > 4 and w.endswith("es") and not w.endswith("ss"):
-            w = w[:-2]
-        elif len(w) > 4 and w.endswith("s") and not w.endswith("ss") and not w.endswith("us"):
-            w = w[:-1]
-        tokens.append(w)
+        for part in _split_camel(w).split():
+            part = part.lower()
+            if part in STOP_WORDS:
+                continue
+            if len(part) > 5 and part.endswith("ing"):
+                part = part[:-3]
+            elif len(part) > 6 and part.endswith("ed") and len(part) - 2 >= 4:
+                part = part[:-2]
+            elif len(part) > 4 and part.endswith("es") and not part.endswith("ss"):
+                part = part[:-2]
+            elif len(part) > 4 and part.endswith("s") and not part.endswith("ss") and not part.endswith("us"):
+                part = part[:-1]
+            tokens.append(part)
     return tokens
 
 
@@ -527,6 +543,7 @@ def cmd_search(query: str, limit: int = 10, category: str | None = None) -> dict
     return {
         "query": query,
         "count": len(results),
+        "total": len(memories),
         "results": [
             {
                 "id": m.id,
@@ -929,6 +946,8 @@ def format_output(data: dict[str, Any], fmt: str = "text") -> str:
             for line in content.split("\n"):
                 lines.append(f"  {line}")
             lines.append("")
+        if data.get("total"):
+            lines.append(f"Recalled {data['count']} of {data['total']} memories")
         return "\n".join(lines)
 
     # List results
