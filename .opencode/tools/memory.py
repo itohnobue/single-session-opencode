@@ -1,16 +1,22 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.10"
+# dependencies = ["rank-bm25>=0.2.2"]
+# ///
 """
-Model Memory Tool v5.1.0 - Session Isolation Edition
+Model Memory Tool v5.2.0 - Multi-Signal Retrieval Edition
 
 A simple, focused persistent memory system for OpenCode.
-Now with session isolation for parallel work.
+Session isolation for parallel work. Multi-signal retrieval:
+keyword scoring fused with BM25 (reciprocal rank fusion).
 
 Features:
 - Long-term knowledge storage in knowledge.md
 - Session memory in session.md with multi-session support
 - Session isolation: multiple CLI/agents can work in parallel
 - Automatic session recovery after context compaction
-- Simple keyword search with word boundaries
+- Multi-signal search: keyword scoring + BM25, fused by RRF
+  (falls back to keyword-only if rank-bm25 is unavailable)
 
 Usage:
     memory.sh add <category> <content> [--tags tag1,tag2]
@@ -45,12 +51,19 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+try:
+    from rank_bm25 import BM25Okapi
+    _HAS_RANK_BM25 = True
+except ImportError:  # pragma: no cover - only when run without uv deps
+    BM25Okapi = None  # type: ignore[assignment]
+    _HAS_RANK_BM25 = False
+
 if sys.platform == "win32" and hasattr(sys.stdout, "buffer"):
     import io
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
-__version__ = "5.1.0"
+__version__ = "5.2.0"
 
 
 # =============================================================================
@@ -328,15 +341,69 @@ def write_session_file(entries: list[SessionEntry]) -> None:
 # SEARCH
 # =============================================================================
 
+def _tokenize_for_bm25(text: str) -> list[str]:
+    """Tokenize + light morphological folding for BM25 input.
+
+    Naive suffix stripping (ing/es/s/ed) folds word forms consistently on both
+    the corpus and the query side ('services' -> 'service', 'restarting' ->
+    'restart'), widening the lexical match surface without full stemming.
+    Guards: never strip 'us'/'ss' words, keep stems >= 4 chars.
+    """
+    tokens: list[str] = []
+    for w in re.findall(r"\w+", text):
+        w = w.lower()
+        if w in STOP_WORDS:
+            continue
+        if len(w) > 5 and w.endswith("ing"):
+            w = w[:-3]
+        elif len(w) > 6 and w.endswith("ed") and len(w) - 2 >= 4:
+            w = w[:-2]
+        elif len(w) > 4 and w.endswith("es") and not w.endswith("ss"):
+            w = w[:-2]
+        elif len(w) > 4 and w.endswith("s") and not w.endswith("ss") and not w.endswith("us"):
+            w = w[:-1]
+        tokens.append(w)
+    return tokens
+
+
+def _memory_doc_text(memory: Memory) -> str:
+    """Combined text used as the BM25 corpus document for a memory entry."""
+    parts = [memory.category]
+    if memory.tags:
+        parts.append(" ".join(memory.tags))
+    parts.append(memory.content)
+    return " ".join(parts)
+
+
+def _rrf_scores(*ranked_lists: list[Memory], k: int = 60) -> dict[str, float]:
+    """Reciprocal Rank Fusion of multiple ranked lists.
+
+    Each list contributes 1/(k + rank) for its entries; robust to the
+    different score scales of keyword scoring vs BM25.
+    """
+    scores: dict[str, float] = {}
+    for ranked in ranked_lists:
+        for rank, mem in enumerate(ranked):
+            scores[mem.id] = scores.get(mem.id, 0.0) + 1.0 / (k + rank + 1)
+    return scores
+
+
 def search_memories(
     query: str,
     memories: list[Memory],
     limit: int = 10,
     category: str | None = None,
 ) -> list[tuple[Memory, float]]:
-    """Simple keyword search with word boundaries.
+    """Multi-signal search: keyword scoring + BM25, fused by reciprocal rank.
 
-    Scoring: category match = 2x, tag match = 1.5x, content match = 1x
+    Signal A (unchanged semantics): word-boundary keyword scoring over
+    category/tags/content (2x / 1.5x / 1x).
+    Signal B: BM25 over lowercased, morphologically folded text.
+
+    Results from either signal are merged by RRF (k=60) — entries matched by
+    BM25 alone (e.g. word-form variants) now surface without replacing the
+    proven keyword ranking. Falls back to keyword-only when rank-bm25 is not
+    importable.
     """
     # Tokenize query, filter stop words
     keywords = [w.lower() for w in re.findall(r'\w+', query) if w.lower() not in STOP_WORDS]
@@ -347,7 +414,8 @@ def search_memories(
     if category:
         memories = [m for m in memories if m.category == category.lower()]
 
-    scored = []
+    # --- Signal A: keyword scoring (existing semantics) ---
+    kw_scored: list[tuple[Memory, float]] = []
     for memory in memories:
         score = 0.0
 
@@ -361,11 +429,42 @@ def search_memories(
                 score += 1.0
 
         if score > 0:
-            scored.append((memory, score))
+            kw_scored.append((memory, score))
 
     # Sort by score desc, then recency desc
-    scored.sort(key=lambda x: (x[1], x[0].changed_at or ""), reverse=True)
-    return scored[:limit]
+    kw_scored.sort(key=lambda x: (x[1], x[0].changed_at or ""), reverse=True)
+    kw_ranked = [m for m, _ in kw_scored]
+
+    # --- Signal B: BM25 over folded text ---
+    bm25_ranked: list[Memory] = []
+    if _HAS_RANK_BM25 and memories:
+        try:
+            docs = [_tokenize_for_bm25(_memory_doc_text(m)) for m in memories]
+            docs = [d for d in docs if d]
+            q_tokens = _tokenize_for_bm25(query)
+            if docs and q_tokens:
+                bm25 = BM25Okapi(docs)
+                bm25_scores = bm25.get_scores(q_tokens)
+                scored = sorted(zip(memories, bm25_scores), key=lambda x: x[1], reverse=True)
+                bm25_ranked = [m for m, s in scored if s > 0]
+        except Exception:
+            # BM25 is a quality booster, never a breaker — fall back to A
+            bm25_ranked = []
+
+    # --- Fuse by reciprocal rank ---
+    if not kw_ranked and not bm25_ranked:
+        return []
+
+    fused = _rrf_scores(kw_ranked, bm25_ranked)
+    by_id = {m.id: m for m in memories}
+
+    # Sort by fused score desc, then recency desc
+    scored_list = sorted(
+        ((by_id[mid], score) for mid, score in fused.items()),
+        key=lambda x: (x[1], x[0].changed_at or ""),
+        reverse=True,
+    )
+    return scored_list[:limit]
 
 
 # =============================================================================
