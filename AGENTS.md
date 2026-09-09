@@ -194,6 +194,8 @@ Two-tier: **Knowledge** (`knowledge.md`) permanent, **Session** (`session.md`) t
 3. **Add new learnings** — categorized (see table above), tagged
 4. **Report** — "Memories saved: [list]; updated: [list]; retired: [list] (reasons)" or "Memories saved: None"
 
+**Subagent read access (READ-ONLY):** subagents are read-only consumers of the memory system — the coordination templates tell them to run 1-2 `memory.sh search` / `list` (or read `knowledge.md`) before starting work as a cheap prior-art check, and to report the result in one line. They NEVER `add` / `delete` / `session.*` — all writes stay the main model's exclusive job (adds, deletes, sessions, harvesting). The write policy above is unchanged; this only adds reads.
+
 **Other:** `search "<query>"`, `list [--category CAT]`, `delete <id>`, `stats`
 
 ### Session
