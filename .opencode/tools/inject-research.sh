@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # inject-research.sh — Inject a briefing DIGEST into a task file (the digest + full-report
-# scheme, same as assemble-task.sh --research-file). The digest may be produced by the
-# prepare agent OR curated by the main model from its own research.
+# scheme, same as assemble-task.sh --research-file). The digest is produced by the
+# prepare agent (mandatory in T2/T3 runs — no lead-curated substitute).
 # Produces the final task file with structure:
 #   ## RESEARCH DATA (your briefing — compact digest)
 #   <digest content>

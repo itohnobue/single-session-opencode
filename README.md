@@ -22,9 +22,9 @@ The shipped `opencode.json` sets only `permission: allow` — **no model pin**: 
 - **One session, one worker** — the model reads, writes, runs, and verifies, all in dialog with you. You can interject or redirect at any moment.
 - **Search-first** — when the answer depends on external facts (versions, APIs, docs), the model runs `web_search.sh` instead of guessing. Memory-only answers are the exception.
 - **Tiered delegation** — big/heavy/context-hungry work goes to subagents in three tiers. Delegation is judgment, not a pipeline:
-  - **T1 — plain executor** — task context is the briefing, no research. Use when research is not needed.
-  - **T2 — researched executor** — `prepare-agent` researches the task's technologies into a full research report + compact digest that the executor carries as its briefing.
-  - **T3 — full workflow** — for any complex issue: review agents gather research + discovery + review → research-backed second opinion at MEDIUM+ → adversarial verification → fixes.
+  - **T1 — plain executor** — task context is the briefing, no research. Use only when the task file carries every fact.
+  - **T2 — researched executor** — `prepare-agent` ALWAYS researches the task's technologies into a full research report + compact digest that the executor carries as its briefing (the spawn is mandatory).
+  - **T3 — full workflow** — for any complex issue, always researched (mandatory prepare at issue start): review agents gather research + discovery + review → research-backed second opinion at MEDIUM+ → adversarial verification → fixes.
 - **Memory that survives** — two-tier knowledge/session memory via `memory.sh`.
 
 ## The 8 agents

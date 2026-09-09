@@ -18,8 +18,8 @@
 #   -n, --name        Agent instance name (e.g. exec-review, impl-db, prepare-web)
 #   --task            Path to task assignment file (PROJECT, ENVIRONMENT,
 #                     PRIOR CONTEXT, YOUR TASK, WRITABLE FILES — main-model-written)
-#   --research-file   Path to the briefing DIGEST — produced by the prepare agent OR
-#                     curated by the main model from its own research — injected as the
+#   --research-file   Path to the briefing DIGEST — produced by the prepare agent
+#                     (MANDATORY in T2/T3 runs — no lead-curated substitute) — injected as the
 #                     `## RESEARCH DATA` section between template and task (T2/T3 runs;
 #                     omit for T1 when the task file's own context is the briefing)
 #   --research-report Path to the briefing's full report file (no size cap; same producers
@@ -199,7 +199,7 @@ mkdir -p "$OUT_DIR"
   # before the task (structure: template → RESEARCH DATA → task).
   if [[ -n "$RESEARCH_FILE" ]]; then
     printf '%s\n' '## RESEARCH DATA (your briefing — compact digest)'
-    printf '%s\n\n' 'This is the research DIGEST for this task — your map of the briefing data (prepared by the prepare agent or curated by the main model). Use it; do not redo the research. Shape your working form from it before starting the task.'
+    printf '%s\n\n' 'This is the research DIGEST for this task — your map of the briefing data (produced by the prepare agent — mandatory in T2/T3 runs). Use it; do not redo the research. Shape your working form from it before starting the task.'
     if [[ -n "$RESEARCH_REPORT_ABS" ]]; then
       printf 'FULL RESEARCH REPORT: %s\n' "$RESEARCH_REPORT_ABS"
       printf '%s\n\n' 'Read or grep this file for the full curated research behind this digest — consult it for depth on demand, never dump it wholesale into context.'

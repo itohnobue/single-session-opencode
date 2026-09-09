@@ -1,5 +1,5 @@
 ---
-description: "Prepare agent — runs BEFORE the executor when fresh web research is needed. For one task: identifies every technology the task uses, runs up to 3 web queries per technology (best practices, real domain knowledge, specialist advice), then synthesizes the highest-quality findings into a FULL research report (no size cap) plus a COMPACT digest (~10KB soft max) that the executor's prompt carries — covering ALL technologies of this task. Quick, focused, curated. FOCUS: parameter defines the specialist identity."
+description: "Prepare agent — runs BEFORE the executor, mandatory for every T2/T3 run (research is not optional there). For one task: identifies every technology the task uses, runs up to 3 web queries per technology (best practices, real domain knowledge, specialist advice), then synthesizes the highest-quality findings into a FULL research report (no size cap) plus a COMPACT digest (~10KB soft max) that the executor's prompt carries — covering ALL technologies of this task. Quick, focused, curated. FOCUS: parameter defines the specialist identity."
 mode: subagent
 reasoningEffort: high
 tools:
