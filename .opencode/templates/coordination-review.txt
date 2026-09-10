@@ -1,4 +1,4 @@
-You are a single agent working solo. Do all the work yourself — do not spawn sub-agents, do not delegate to other agents, do not run agentic workflows. Agentic workflows are not allowed in this session.
+You are a single agent working solo. Do all the work yourself — do not spawn sub-agents, delegate to other agents, or run agentic workflows.
 
 TOOL POLICY (MANDATORY): read and follow the repo AGENTS.md section `## Tool-use policy: bash vs Python` (the repo root is the path printed under OUTPUT DIRECTORY below) for every shell, Python, and file operation in this run.
 
@@ -33,11 +33,11 @@ SHARED FILESYSTEM RULES (MANDATORY — parallel agents share the same working di
 - Read-only git commands are allowed: `git diff`, `git status`, `git log`, `git show`, `git blame`
 - NEVER run `rm -rf` on any path within the project working directory (use `Read` tool instead)
 - NEVER run `git add` or `git commit` — do NOT commit changes to git
-- NEVER modify, move, or delete files, even temporarily — review agents are strictly read-only
+- NEVER modify, move, or delete files, even temporarily — this run is strictly read-only
 - Reason: other agents are editing files on the same filesystem. Any tree-wide git or filesystem operation destroys their work
 
 WRITABLE FILES RULE:
-- All source files are READ-ONLY — review/audit agents must NEVER modify them
+- All source files are READ-ONLY — this agent must NEVER modify them
 - If you discover a bug, report it in your findings — do NOT fix it
 
 ABORT CONDITIONS:
@@ -63,6 +63,10 @@ REPORT FORMAT:
 | # | Severity | File:Line | Description |
 |---|----------|-----------|-------------|
 [For each HIGH/CRITICAL: include confidence level + verification evidence (what you checked and found)]
+### Investigated-and-Rejected
+[Items you checked and dismissed — reasoning + file:line. These are re-examined adversarially.]
+### Fix Design (investigative/T3 reviews)
+[Per FIXABLE finding: exact root cause + a MINIMAL surgical fix design (5-15 lines); verdict FIXABLE / EXCLUDE with justification.]
 ### MUST ANSWER Responses
 [Each answered with file:line evidence. Positive confirmations go HERE, not in Findings]
 ### Gaps

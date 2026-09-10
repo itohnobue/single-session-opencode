@@ -18,6 +18,9 @@
 #   -n, --name        Agent instance name (e.g. exec-review, impl-db, prepare-web)
 #   --task            Path to task assignment file (PROJECT, ENVIRONMENT,
 #                     PRIOR CONTEXT, YOUR TASK, WRITABLE FILES — main-model-written)
+#                     Escape: `{{NAME}}` in the task file stays a LITERAL `{NAME}`
+#                     (single-brace `{NAME}` is substituted with the agent name).
+#                     `$REPO_ROOT/tmp/` and `${REPO_ROOT}/tmp/` references are left as written.
 #   --research-file   Path to the briefing DIGEST — produced by the prepare agent
 #                     (MANDATORY in T2/T3 runs — no lead-curated substitute) — injected as the
 #                     `## RESEARCH DATA` section between template and task (T2/T3 runs;
@@ -207,19 +210,26 @@ mkdir -p "$OUT_DIR"
     cat "$RESEARCH_FILE"
     printf '\n%s\n\n' '---'
   fi
-  # Substitute {NAME}, then strip standalone report-file paths written by the main model
+  # Substitute {NAME} (escape: {{NAME}} in the task file is a LITERAL {NAME} — kept as a
+  # placeholder through the pipeline and restored after the {NAME} guard below), then strip
+  # standalone report-file paths written by the main model
   # (only lines that are sole report paths — prose references like
   # "See review-auth-report.md for context" are preserved).
-  # Resolve relative tmp/ references to absolute. Idempotent: protect any
-  # pre-existing ${REPO_ROOT}/tmp/ so absolute paths are never double-prefixed.
+  # Resolve relative tmp/ references to absolute. Idempotent: protect the expanded absolute
+  # path and the literal `$REPO_ROOT/tmp/` / `${REPO_ROOT}/tmp/` forms so none is re-prefixed.
   # The word-boundary equivalent (^|[^[:alnum:]_]) is pure POSIX ERE — it
   # replaces GNU-only [[:<:]] (unsupported by MSYS/BSD sed). The , delimiter
   # keeps the alternation | unescaped, so it is valid on GNU, BSD, and MSYS.
-  sed "s|{NAME}|${NAME}|g" "$TASK_FILE" \
+  sed "s|{{NAME}}|@NAME_LITERAL@|g" "$TASK_FILE" \
+    | sed "s|{NAME}|${NAME}|g" \
     | sed -E '/^[[:space:]]*(-[[:space:]]*)?(tmp\/)?[a-zA-Z0-9_.-]+-report\.md[[:space:]]*$/d' \
     | sed "s|${REPO_ROOT_SED}/tmp/|@REPO_TMP_PLACEHOLDER@|g" \
+    | sed 's|\${REPO_ROOT}/tmp/|@REPO_TMP_VAR1@|g' \
+    | sed 's|\$REPO_ROOT/tmp/|@REPO_TMP_VAR2@|g' \
     | sed -E "s,(^|[^[:alnum:]_])tmp/,\1${REPO_ROOT_SED}/tmp/,g" \
-    | sed "s|@REPO_TMP_PLACEHOLDER@|${REPO_ROOT_SED}/tmp/|g"
+    | sed "s|@REPO_TMP_PLACEHOLDER@|${REPO_ROOT_SED}/tmp/|g" \
+    | sed 's|@REPO_TMP_VAR1@|${REPO_ROOT}/tmp/|g' \
+    | sed 's|@REPO_TMP_VAR2@|$REPO_ROOT/tmp/|g'
   printf '\n'
   # Auto-inject the report-path directive (source read/write scope is defined
   # by the coordination rules).
@@ -233,9 +243,15 @@ mkdir -p "$OUT_DIR"
 [[ ! -s "$OUTPUT" ]] && { echo "ERROR: Output file is empty after assembly: $OUTPUT" >&2; exit 1; }
 
 # ── Validate no unsubstituted template variables remain ──
+# (Escaped literals are still @NAME_LITERAL@ here — restored after this guard, no false positives.)
 if grep -q '{NAME}' "$OUTPUT" 2>/dev/null; then
   echo "ERROR: Unsubstituted {NAME} found in assembled task prompt: $OUTPUT" >&2
   exit 1
+fi
+
+# ── Restore escaped literal {NAME} tokens ({{NAME}} in the source) ──
+if grep -q '@NAME_LITERAL@' "$OUTPUT" 2>/dev/null; then
+  sed 's|@NAME_LITERAL@|{NAME}|g' "$OUTPUT" > "${OUTPUT}.namelit" && mv "${OUTPUT}.namelit" "$OUTPUT"
 fi
 
 BYTES=$(wc -c < "$OUTPUT" | tr -d ' ')

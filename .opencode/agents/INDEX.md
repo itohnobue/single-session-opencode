@@ -1,6 +1,6 @@
 # Agent Directory (8 agents)
 
-Quick selection reference. All workflow instructions live in `AGENTS.md` — the Agent Delegation section (executor tiers T1/T2/T3, task splitting by volume, second-opinion rules, optional VERIFY block). Read it before delegating.
+Quick selection reference. All workflow instructions live in `AGENTS.md` — the Agent Delegation section (executor tiers T1/T2/T3, task splitting by volume, second-opinion rules, optional VERIFY block) and the Delegation Playbook (when/how to spawn, reviewing output, the T3 workflow). Read it before delegating.
 
 | File | Agent | Role |
 |------|-------|------|
