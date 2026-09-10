@@ -55,7 +55,7 @@ Usage:
 
 What it does:
   1. Checks that OpenCode CLI is installed and in PATH
-  2. Copies .opencode\ directory (agents, tools, templates) to your project
+  2. Copies .opencode\ directory (agents, tools, templates, skills) to your project
   3. Creates AGENTS.md with single-session workflow instructions
   4. Creates opencode.json with default allowance (skipped if one exists)
   5. Creates tmp\ directory for agent working files
@@ -207,6 +207,7 @@ function Main {
     Write-Host "    .opencode\agents\     $agentCount agent definitions"
     Write-Host "    .opencode\tools\      Research & memory tools"
     Write-Host "    .opencode\templates\  Agent prompt boilerplate"
+    Write-Host "    .opencode\skills\     Workflow skills"
     Write-Host "    AGENTS.md             Single-session workflow instructions"
     Write-Host "    opencode.json         Default allowance (permission allow, no model pin)"
     Write-Host "    tmp\                  Agent working directory"

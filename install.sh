@@ -43,7 +43,7 @@ Usage:
 
 What it does:
   1. Checks that OpenCode CLI is installed and in PATH
-  2. Copies .opencode/ directory (agents, tools, templates) to your project
+  2. Copies .opencode/ directory (agents, tools, templates, skills) to your project
   3. Creates AGENTS.md with single-session workflow instructions
   4. Creates opencode.json with default allowance (skipped if one exists)
   5. Creates tmp/ directory for agent working files
@@ -181,6 +181,7 @@ main() {
   printf '    .opencode/agents/     %s agent definitions\n' "$(find "$target/.opencode/agents" -name '*.md' ! -name 'INDEX.md' 2>/dev/null | wc -l | tr -d ' ')"
   printf '    .opencode/tools/      Research & memory tools\n'
   printf '    .opencode/templates/  Agent prompt boilerplate\n'
+  printf '    .opencode/skills/     Workflow skills\n'
   printf '    AGENTS.md             Single-session workflow instructions\n'
   printf '    opencode.json         Default allowance (permission allow, no model pin)\n'
   printf '    tmp/                  Agent working directory\n'

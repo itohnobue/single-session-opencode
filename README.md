@@ -11,7 +11,7 @@ cd single-session-opencode
 # or: .\install.ps1 C:\path\to\project   (Windows)
 ```
 
-The installer copies `.opencode/` (agents, tools, templates), `AGENTS.md`, and a minimal `opencode.json` into your project — an existing `AGENTS.md` or `opencode.json` is never overwritten. Open the project with OpenCode and the suite is active.
+The installer copies `.opencode/` (agents, tools, templates, skills), `AGENTS.md`, and a minimal `opencode.json` into your project — an existing `AGENTS.md` or `opencode.json` is never overwritten. Open the project with OpenCode and the suite is active.
 
 ## Default allowance
 
@@ -25,6 +25,7 @@ The shipped `opencode.json` sets only `permission: allow` — **no model pin**: 
   - **T1 — plain executor** — task context is the briefing, no research. Use only when the task file carries every fact.
   - **T2 — researched executor** — `prepare-agent` ALWAYS researches the task's technologies into a full research report + compact digest that the executor carries as its briefing (the spawn is mandatory).
   - **T3 — full workflow** — for any complex issue, always researched (mandatory prepare at issue start): review agents gather research + discovery + review → research-backed second opinion at MEDIUM+ → adversarial verification → fixes.
+- **Continuation handoff** — a fixed 8-section carry-over so a fresh agent or later session resumes without re-discovery: R3 run retirement uses it automatically, and `/handoff` checkpoints a session on demand.
 - **Memory that survives** — two-tier knowledge/session memory via `memory.sh`.
 
 ## The 8 agents

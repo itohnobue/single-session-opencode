@@ -24,5 +24,6 @@ knowledge.md
 session.md
 .opencode/current_session
 
-# Machine-local skills
-.opencode/skills
+# Machine-local skills (except workflow skills)
+.opencode/skills/*
+!.opencode/skills/handoff/
