@@ -22,4 +22,4 @@ For CRITICAL or HIGH findings, provide supporting evidence:
 - Trigger: what action or input triggers this (if known)
 - Guards checked: grep for existing protections (paste results or "NONE FOUND")
 - Confidence: CONFIRMED (evidence chain proven) / LIKELY (pattern matches) / POSSIBLE (suspicious, needs investigation)
-Report ALL confidence levels — do NOT suppress findings just because full proof is hard to construct.
+Report ALL confidence levels — never suppress unproven findings.

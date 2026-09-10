@@ -193,7 +193,7 @@ mkdir -p "$OUT_DIR"
   # ── OUTPUT DIRECTORY — before TASK ASSIGNMENT to prevent PROJECT anchoring bias ──
   printf '%s\n' '--- OUTPUT DIRECTORY ---'
   printf 'All reports and output files go to: %s/tmp/\n' "$REPO_ROOT"
-  printf '%s\n\n' 'The PROJECT directory (below) is for READING source files — do NOT write reports there.'
+  printf '\n'
   printf '%s\n\n' '--- TASK ASSIGNMENT ---'
   # Research-first pipeline: inject the research digest right after the template,
   # before the task (structure: template → RESEARCH DATA → task).
@@ -221,21 +221,11 @@ mkdir -p "$OUT_DIR"
     | sed -E "s,(^|[^[:alnum:]_])tmp/,\1${REPO_ROOT_SED}/tmp/,g" \
     | sed "s|@REPO_TMP_PLACEHOLDER@|${REPO_ROOT_SED}/tmp/|g"
   printf '\n'
-  # Auto-inject the WRITABLE FILES directive. For review/research types,
-  # source files are read-only. For code type, source files from the task
-  # file's WRITABLE FILES section may be writable.
+  # Auto-inject the report-path directive (source read/write scope is defined
+  # by the coordination rules).
   printf '%s\n' '--- WRITABLE FILES (automatic) ---'
   printf 'Write your report to EXACTLY `%s/tmp/%s-report.md` UNLESS the task file has a DELIVERABLES section specifying explicit report paths — then use those.\n' "$REPO_ROOT" "$NAME"
   printf '%s\n' '(This is your working directory. NOT the PROJECT directory.)'
-  case "$TYPE" in
-    review|research)
-      printf 'All source files are READ-ONLY — do NOT modify them.\n'
-      ;;
-    code)
-      printf 'You may modify files listed in the WRITABLE FILES section of the task above.\n'
-      printf 'All other source files are READ-ONLY.\n'
-      ;;
-  esac
   printf '\n'
 } > "$OUTPUT"
 

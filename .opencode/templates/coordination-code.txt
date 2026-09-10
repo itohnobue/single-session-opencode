@@ -1,4 +1,4 @@
-You are a single agent working solo. Do all the work yourself — do not spawn sub-agents, do not delegate to other agents, do not run agentic workflows. Agentic workflows are not allowed in this session.
+You are a single agent working solo. Do all the work yourself — do not spawn sub-agents, delegate to other agents, or run agentic workflows.
 
 TOOL POLICY (MANDATORY): read and follow the repo AGENTS.md section `## Tool-use policy: bash vs Python` (the repo root is the path printed under OUTPUT DIRECTORY below) for every shell, Python, and file operation in this run.
 
@@ -13,9 +13,7 @@ MEMORY USE (READ-ONLY):
 - Report one line: Memory search: "<query>" -> N relevant (<short summary>) — or "memory not available".
 
 COORDINATION:
-- Standalone agent — no inter-agent communication
 - After EACH subtask, append new results to report (Read existing content first, then Write full updated report)
-- If you cannot complete: write partial report explaining what remains
 
 AUTONOMY (MANDATORY):
 - NEVER ask the operator questions, request approval or confirmation, or ask "should I continue?" — this includes the `question` tool. The operator is not part of the execution loop.
@@ -37,7 +35,7 @@ SHARED FILESYSTEM RULES (MANDATORY — parallel agents share the same working di
 - NEVER run `git add` or `git commit` — do NOT commit changes to git
 - NEVER modify, move, or delete files outside the WRITABLE FILES list, even temporarily
 - Reason: other agents are editing files on the same filesystem. Any tree-wide git or filesystem operation destroys their work
-- If a build or test fails because other agents' incomplete code has compilation errors: do NOT attempt to fix their files or clean the tree. Write "BUILD NOT VERIFIED: pre-existing errors in [other agent's files]" and report the actual failures
+- If a build or test fails because other agents' incomplete code has compilation errors: do NOT attempt to fix their files or clean the tree. Write "BUILD NOT VERIFIED: pre-existing errors in [other agent's files]" and report the actual failures. Your report is evaluated on your changes, not on whether the full tree builds
 
 WRITABLE FILES RULE:
 - You may modify files listed in the WRITABLE FILES section of the task assignment

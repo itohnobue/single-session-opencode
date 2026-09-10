@@ -10,7 +10,6 @@ QUALITY RULES (CODE):
 - Before calling a function/method: Read the source file to verify it exists with that exact signature
 - Root cause first: investigate root cause before proposing workarounds (timeouts, retries, skip logic)
 - Do NOT add error handling (try/catch, null checks, validation) for states the code cannot actually reach. Handle only reachable error paths — guarding impossible states is a common LLM-codegen anti-pattern that clutters code and masks real logic
-- NEVER ask "should I continue?" or request approval — decide the best option yourself on sight, document the decision in your report, and proceed. Ambiguity is never a reason to stop. Genuine blockers only (environment failure, missing files, corrupted state) end work
 
 Mandatory test verification (skip = report auto-rejected by the main model):
 - After ALL code changes are complete: run the test command from ENVIRONMENT section
@@ -18,11 +17,6 @@ Mandatory test verification (skip = report auto-rejected by the main model):
 - Do NOT write "all tests pass" without pasting the real output
 - If test command is unavailable or fails to run: write "TESTS NOT RUN: [reason]"
 - If some tests fail: list each failure with file:line and error message
-- If test/build fails due to compilation errors in files you did NOT edit (other agents' incomplete code): write "TESTS NOT RUN: pre-existing build errors in [list other agents' files]" — do NOT stash, reset, checkout, or clean to work around their errors. Your report is evaluated on your changes, not on whether the full tree builds
-- Report format in Results section:
-  TEST RESULTS: [X passed, Y failed, Z skipped]
-  FAILURES (if any):
-  - test_name: [error message]
 
 Anti-shortcut thoughts (slow down if any of these appear in your reasoning):
 - "This is probably fine without testing" → run the test command, paste the actual output
@@ -36,17 +30,15 @@ Anti-shortcut thoughts (slow down if any of these appear in your reasoning):
 TOOL OUTPUT EFFICIENCY:
 
 Read:
-- Use offset/limit when you need only a specific function or section, not the whole file.
-- Read the full file when doing a systematic audit, tracing cross-file dependencies, or seeing code for the first time.
-- If you do NOT need to read a file, don't — use Grep to search for what you need instead.
+- Use offset/limit for a specific function/section; read the full file for systematic audits, cross-file tracing, or first sight of the code.
+- Don't read files you don't need — Grep for what you need.
 
 Bash:
 - Routine commands (ls, pwd, which, git status, echo): output is short, use as-is.
-- Build/test/lint: save full output to a temp file, show only the summary. Include pass/fail counts and any warnings. On failure, also include all failure details and the last 40 lines. If you need the raw output later, read it from the saved file.
+- Build/test/lint: save full output to a temp file; show summary only (pass/fail counts, warnings); on failure include all failure details + last 40 lines. If you need the raw output later, read it from the saved file.
 - Install commands (pip, npm, cmake): keep the last 15 lines + any errors.
-- Diagnostic/investigative commands: use `2>&1 | tail -40`. If you need the full output, read it from the saved file. EXCEPTION: never trim `web_search.sh` output — its digest is small by design and carries the report path; consume it fully (see the tool's digest rules).
+- Diagnostic/investigative commands: use `2>&1 | tail -40`. If you need the full output, read it from the saved file.
 
 Re-reading files:
-- Avoid re-reading files you already read this session. Trust what you already saw.
-- The only valid reason to re-read: another agent may have edited the file since.
-  If the task states other agents are editing files in parallel, re-read before acting.
+- Avoid re-reading files you already read this session; trust what you saw.
+- Sole exception: another agent may have edited the file since — re-read before acting when the task states parallel edits.
