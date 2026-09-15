@@ -34,7 +34,7 @@ The shipped `opencode.json` sets only `permission: allow` — **no model pin**: 
 
 | Agent | Role |
 |-------|------|
-| `prepare-agent` | Web-researches a task's technologies (≤3 queries per tech), curates a full research report (no size cap) + compact digest (~10KB) the executor prompt carries. `FOCUS:` defines the specialist identity. |
+| `prepare-agent` | Web-researches a task's technologies to coverage (no fixed query budget), curates a full research report (no size cap) + compact digest (~10KB) the executor prompt carries. `FOCUS:` defines the specialist identity. |
 | `executor` | Does the work — T1 plain (task context as briefing, no research) or T2/T3 with a research briefing. All work types: implementation, review, research, deep analysis. |
 | `postfix-reviewer` | Post-fix review ONLY (always MAX effort, read-only) — verifies applied fixes against their design; verdict APPROVED / NEEDS-FIX. |
 | `verification-analyst` | Extraction + synthesis only for findings-heavy flows — dedup, tagging, synthesis grid (knowledge harvesting is the main model's job, in-session). |
