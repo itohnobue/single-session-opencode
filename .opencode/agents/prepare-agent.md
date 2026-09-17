@@ -1,7 +1,6 @@
 ---
 description: "Prepare agent — runs BEFORE the executor, mandatory for every T2/T3 run (research is not optional there). For one task: identifies every technology the task uses, researches each one to coverage (best practices, real domain knowledge, specialist advice, pitfalls), then synthesizes the highest-quality findings into a FULL research report (no size cap) plus a COMPACT digest (~10KB soft max) that the executor's prompt carries — covering ALL technologies of this task. Coverage-driven, focused, curated. FOCUS: parameter defines the specialist identity."
 mode: subagent
-reasoningEffort: high
 tools:
   read: true
   write: true

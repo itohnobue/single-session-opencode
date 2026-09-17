@@ -1,7 +1,6 @@
 ---
 description: Expert data researcher for discovering, collecting, and analyzing diverse data sources. Specializes in data mining, pattern recognition, and extracting actionable insights from complex datasets. Use for data discovery, source evaluation, or exploratory analysis.
 mode: subagent
-reasoningEffort: high
 tools:
   read: true
   write: true

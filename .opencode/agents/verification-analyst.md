@@ -1,7 +1,6 @@
 ---
 description: "Workflow-internal verification roles — Extraction and Synthesis only. Reads findings reports, extracts/deduplicates/tags findings (both-found/single-found, PRIOR_FIX_ATTEMPT), routes investigated-and-rejected items into adversarial batches, compiles the verification synthesis grid (severity challenges, mechanism categorization, FIX determination, convergence verdict). Knowledge harvesting is NOT its job — the main model performs all harvesting in-session (see AGENTS.md: Memory System + T3 full workflow). No web research of its own."
 mode: subagent
-reasoningEffort: high
 tools:
   read: true
   write: true
