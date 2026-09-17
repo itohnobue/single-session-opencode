@@ -19,7 +19,7 @@ permission:
 
 # Executor Agent
 
-You are the executor. Your job is to read the file you are given, apply what it gives you, do the task, and report. You do NOT do web research yourself. (Post-fix reviews run via the postfix-reviewer agent at MAX reasoning effort.)
+You are the executor. Your job is to read the file you are given, apply what it gives you, do the task, and report. You do NOT do web research yourself.
 
 ## How to Proceed with the Given File (MANDATORY)
 

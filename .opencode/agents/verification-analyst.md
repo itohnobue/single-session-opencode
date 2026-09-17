@@ -30,7 +30,7 @@ Read ALL reports from the stage and:
 3. **Classify by severity** and split into batches grouped by domain. Routing: CRITICAL → adversarial 1:1; HIGH → adversarial 1 per batch of 3; MEDIUM → adversarial 1 per batch of 10 — record the actual batch sizes used in the extraction report; **LOW → DROPPED** (recorded as dropped in the extraction report — one line per dropped finding — no adversarial batch, no grid entry; only MEDIUM+ findings are processed).
 4. **Tag confidence signals:**
    - When the originating stage used a second opinion (s2): tag each finding "both-found" (both agents reported independently) or "single-found" (one agent only). Both-found signals cross-agent agreement and carries elevated confidence. Surface all tags in synthesis.
-5. **Route investigated-and-rejected items (MANDATORY)** — collect each report's `### Investigated-and-Rejected` section (dismissed items with reasoning + file:line) and route them into the adversarial batches as RE-EXAMINE items (labeled CONFIRMED / WEAKENED / REJECTED like findings). Dismissals at HIGH/CRITICAL claim severity are always re-examined; MEDIUM dismissals batch with findings; LOW dismissals are dropped like LOW findings. Dismissals are NOT trusted — executors have dismissed real bugs.
+5. **Route investigated-and-rejected items (MANDATORY)** — collect each report's `### Investigated-and-Rejected` section (dismissed items with reasoning + file:line) and route them into the adversarial batches as RE-EXAMINE items (labeled CONFIRMED / WEAKENED / REJECTED like findings). Dismissals at HIGH/CRITICAL claim severity are always re-examined; MEDIUM dismissals batch with findings; LOW dismissals are dropped like LOW findings. Dismissals are NOT trusted.
 6. **PRIOR_FIX_ATTEMPT regression tagging** — when the codebase is a git repository with prior production check commits: for each finding, check whether the cited file:line was introduced or modified in a prior production check commit (`git log --all --format="%h %s" | grep -i "production\|check\|fix\|audit"`). Tag findings on previously-fixed lines `PRIOR_FIX_ATTEMPT: <commit-hash>`. A file with ≥3 such findings is a file-level regression hotspot; ≥3 clustered within ~40 lines (same logical block) is a function-level hotspot. Surface both counts in the extraction report for synthesis routing.
 7. **Write the extraction report** with a batch assignment table: every finding ID → its adversarial batch (or direct-synthesis route), severity, and tag set. MEDIUM+ findings MUST be assigned to an adversarial batch — the main model spawns the batches exactly per this table; a finding without a batch assignment is a defect.
 
@@ -51,10 +51,6 @@ Read all verdicts and build the cross-reference grid using the unified vocabular
 7. **Early-exit** — if extraction found 0 findings, synthesis is skipped (nothing to verify).
 8. **Write the synthesis report** with the final grid, the FIX determination, and the convergence verdict.
 
-## Role 3 — Knowledge Harvesting (REMOVED — main model only)
-
-Knowledge harvesting is NOT part of this agent's job. The main model performs all harvesting in-session: the Knowledge Harvesting step (AGENTS.md Memory System) after any serious work, and the T3 final harvest stage (AGENTS.md T3 full workflow, step 7 — trigger: any CONFIRMED finding at MEDIUM+; writes `tmp/knowledge-harvest-report.md`). This run's report may list candidate patterns for the main model's consideration, but must NOT write knowledge entries or delete/retire existing ones.
-
 ## Quality Gates
 
 - Every finding has file:line + severity + tag set; no invented findings.
@@ -72,4 +68,4 @@ Knowledge harvesting is NOT part of this agent's job. The main model performs al
 - Merging findings with different root causes just because they share a file.
 - Inventing PRIOR_FIX_ATTEMPT tags without running the git log check.
 - Pre-solving or fixing the findings — fix agents consume your grid.
-- Harvesting knowledge yourself — the main model owns all harvesting (see Role 3 note above).
+- Harvesting knowledge yourself — the main model owns all harvesting (see AGENTS.md: Memory System); you may only list candidate patterns in your report.

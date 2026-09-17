@@ -49,8 +49,6 @@
 #
 #   # Prepare phase (research generation)
 #   .opencode/tools/assemble-task.sh -a prepare-agent -t prepare -n prepare-impl --task tmp/prepare-impl-task.txt
-#
-#   # Second opinion (T3): primary + research-backed s2 (one prepare, complementary FOCUS) + one s2 executor
 
 set -euo pipefail
 
