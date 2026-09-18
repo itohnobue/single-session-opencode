@@ -150,6 +150,15 @@ For T3 findings-type tasks (reviews, audits, discovery) whose deliverable feeds 
 - Part of the optional VERIFY block (trigger list in the VERIFY section above). NOT automatic after every delegation.
 - The model may also run a quick adversarial pass on its own work anytime (outside the block) when judgment says the work is high-risk.
 
+### Completion Sanity Check (MANDATORY — lead; before knowledge harvesting)
+
+Before considering any T* run finished and before starting knowledge harvesting, the lead runs a sanity check of the original objective against produced evidence. Completeness only — not a correctness re-verification (that is the VERIFY block) and not an agent task; no report artifact.
+
+- Enumerate the original objective, every MUST ANSWER, every promised deliverable, and every open todo/pending item.
+- For each, confirm produced evidence exists: file:line diff, exact command output, test result, artifact on disk. Plans, summaries, effort, and "the executor reported success" do NOT count.
+- Any uncovered / failed / open item → route it back to a fix run and re-check; do not report completion and do not harvest.
+- Clean → proceed to knowledge harvesting and delivery.
+
 ### Prepare task template (main model writes it)
 
 ```
@@ -202,7 +211,7 @@ All 8 agents are native opencode subagents, auto-loaded from `.opencode/agents/*
    ```
    task(description="<3-5 words>", prompt="Read this file. Strictly follow instructions there and execute the described task: tmp/{NAME}-task-prompt.txt", subagent_type="executor")
    ```
-6. **T3 — the full workflow** (any complex issue; findings tasks at MEDIUM+): PREPARE FIRST — the mandatory T3 prepare spawn (digest + full report, FOCUS per issue); every review brief is assembled WITH `--research-file`/`--research-report`. Then the T3 chain: review agents (the primary opinion) → research-backed s2 on the same scope → VERIFY block (step 7) → fix chain → final KNOWLEDGE HARVESTING (main model) — see the T3 full workflow below.
+6. **T3 — the full workflow** (any complex issue; findings tasks at MEDIUM+): PREPARE FIRST — the mandatory T3 prepare spawn (digest + full report, FOCUS per issue); every review brief is assembled WITH `--research-file`/`--research-report`. Then the T3 chain: review agents (the primary opinion) → research-backed s2 on the same scope → VERIFY block (step 7) → fix chain → COMPLETION SANITY CHECK → final KNOWLEDGE HARVESTING (main model) — see the T3 full workflow below.
 7. **OPTIONAL VERIFY block** (critical issues, acted-on findings, or on demand — see VERIFY under Agent Delegation): reviewer first; if the review produces no MEDIUM+ findings, the block ends there; otherwise adversarial → FIX → re-verify.
 
 **Standalone use of agents outside the flow** (adversarial-reviewer, web-searcher, research-analyst, data-researcher, verification-analyst): assemble with their agent name and type — `assemble-task.sh -a adversarial-reviewer -t review -n ...`; research agents (`web-searcher` / `research-analyst` / `data-researcher`) use `-t research`, and `verification-analyst` uses `-t review`.
@@ -256,7 +265,8 @@ The fix executor does NOT resume the review run that designed the fix: fix desig
 4. **POST-FIX REVIEW** (one `postfix-reviewer`, type `review`, per fix — strictly read-only) — verifies the applied diff against the original fix design: correctness, minimality, new bugs, test breakage, race conditions. Verdict **APPROVED / NEEDS-FIX**.
 5. **POST-FIX ADVERSARIAL** (ONLY if any post-fix review produced MEDIUM+ findings) — ONE adversarial reviewer per issue (`adversarial-reviewer` — a single run on that issue's post-fix findings). All clean → skip.
 6. **FINAL FIXES** — apply any confirmed post-fix findings (fresh executor run per finding), then re-review (via `postfix-reviewer`). Report the final picture to the user: finished & skipped issues, verdicts, and — for log-derived bugs — the project's UI smoke tests.
-7. **KNOWLEDGE HARVESTING (final — the main model does it itself, no agents)** — runs once all work is done, when the run produced any CONFIRMED finding at MEDIUM+ (per synthesis grid or adversarial verdicts). If no CONFIRMED MEDIUM+ exists, skip — nothing to harvest. The main model: (1) reads all synthesis grids and findings/review reports from the run; (2) classifies each CONFIRMED finding **PATTERN** (lesson generalizes beyond this fix) vs **INCIDENT** (one-off); (3) for each PATTERN writes a `memory.sh add` entry (category `gotcha` or `pattern`, domain tags) plus a one-line prevention recommendation: mechanically preventable → CI test / lint rule / type-level / shared base; review-only → gotcha; neither → accept recurrence and budget for it; (4) writes `tmp/knowledge-harvest-report.md` — PATTERN/INCIDENT classification, entries added/deleted, prevention recommendations (kept through cleanup — the `rm` glob matches only `*-task-prompt.txt`/`*-task.txt`). **Delivery gate:** before reporting T3 completion, confirm the harvest ran (including the `knowledge.md` commit/push when the file is tracked) and the report exists when the trigger fired. (Search, dedup, old-entry checks, and the VCS commit/push follow the Memory System's Knowledge Harvesting procedure.)
+7. **COMPLETION SANITY CHECK (MANDATORY — lead; before knowledge harvesting)** — enumerate the original objective, every MUST ANSWER, every promised deliverable, and every open todo/pending item; confirm produced evidence exists for each (file:line diff, exact command output, test result, artifact on disk — plans, summaries, effort, and "the executor reported success" do NOT count). Any uncovered/failed/open item → route it back to a fix run and re-check; do not report completion and do not harvest. Clean → proceed to harvest (see Completion Sanity Check under Agent Delegation).
+8. **KNOWLEDGE HARVESTING (final — the main model does it itself, no agents)** — runs once all work is done, when the run produced any CONFIRMED finding at MEDIUM+ (per synthesis grid or adversarial verdicts). If no CONFIRMED MEDIUM+ exists, skip — nothing to harvest. The main model: (1) reads all synthesis grids and findings/review reports from the run; (2) classifies each CONFIRMED finding **PATTERN** (lesson generalizes beyond this fix) vs **INCIDENT** (one-off); (3) for each PATTERN writes a `memory.sh add` entry (category `gotcha` or `pattern`, domain tags) plus a one-line prevention recommendation: mechanically preventable → CI test / lint rule / type-level / shared base; review-only → gotcha; neither → accept recurrence and budget for it; (4) writes `tmp/knowledge-harvest-report.md` — PATTERN/INCIDENT classification, entries added/deleted, prevention recommendations (kept through cleanup — the `rm` glob matches only `*-task-prompt.txt`/`*-task.txt`). **Delivery gate:** before reporting T3 completion, confirm the harvest ran (including the `knowledge.md` commit/push when the file is tracked) and the report exists when the trigger fired. (Search, dedup, old-entry checks, and the VCS commit/push follow the Memory System's Knowledge Harvesting procedure.)
 
 The fix loop follows the convergence rule (see Convergence under Agent Delegation). Never batch multiple findings into one fix agent unless they share the same file/flow — then split by file.
 
@@ -300,7 +310,7 @@ Two-tier: **Knowledge** (`knowledge.md`) permanent, **Session** (`session.md`) t
 
 **Tags:** Cross-cutting concerns (e.g., `--tags redis,production,auth`). **Skip:** Trivial, easily grep-able, duplicates.
 
-**Knowledge Harvesting (after finishing anything serious — multi-step task, findings/review task, non-trivial research, significant change; trivial work skips it):** the main model does it itself, in-session, no agents:
+**Knowledge Harvesting (after finishing anything serious — multi-step task, findings/review task, non-trivial research, significant change; trivial work skips it; runs only after the Completion Sanity Check passes — see Agent Delegation):** the main model does it itself, in-session, no agents:
 1. **Search first** — for each candidate learning: `memory.sh search <topic>`; skip what already exists
 2. **Check old knowledge on the matter** — for every existing entry the task touched: outdated/incorrect → `delete` (reasons go in the report line below); partially right → replace with the better version; still correct → leave untouched. Conservative: prefer silence over noise; never delete without clear evidence
 3. **Add new learnings** — categorized (see table above), tagged
@@ -489,6 +499,7 @@ R6. Anti-over-engineering
 
 ## Delivery
 
+- Before declaring the task finished, the **Completion Sanity Check** must have passed (see Agent Delegation) — no completion claim and no knowledge harvest until it does
 - Write final results to the user in the session — summaries, reports, files changed, severity-labeled findings
 - Clean up temporary task files: `rm -f tmp/*-task-prompt.txt tmp/*-task.txt`
   (keep reports, logs, memory; NEVER delete tmp/uv/ — it's the locally
