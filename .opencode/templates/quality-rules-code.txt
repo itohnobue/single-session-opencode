@@ -27,17 +27,11 @@ Anti-shortcut thoughts (slow down if any of these appear in your reasoning):
 - "This is taking too long, I'll stop here" → no time pressure exists; report partial honest results, don't fake completion
 - "I'll stash changes to get a clean build" → NEVER stash. Other agents' changes in the working tree are NOT yours to clean up. Report "BUILD NOT VERIFIED: pre-existing errors in [other files]" and continue
 
-TOOL OUTPUT EFFICIENCY:
+TOOL OUTPUT EFFICIENCY (output budgets + concurrency: see the Tool output & concurrency table, `AGENTS.md` → Tool-use policy):
 
 Read:
-- Use offset/limit for a specific function/section; read the full file for systematic audits, cross-file tracing, or first sight of the code.
+- Read the full file for systematic audits, cross-file tracing, or first sight of the code.
 - Don't read files you don't need — Grep for what you need.
-
-Bash:
-- Routine commands (ls, pwd, which, git status, echo): output is short, use as-is.
-- Build/test/lint: save full output to a temp file; show summary only (pass/fail counts, warnings); on failure include all failure details + last 40 lines. If you need the raw output later, read it from the saved file.
-- Install commands (pip, npm, cmake): keep the last 15 lines + any errors.
-- Diagnostic/investigative commands: use `2>&1 | tail -40`. If you need the full output, read it from the saved file.
 
 Re-reading files:
 - Avoid re-reading files you already read this session; trust what you saw.

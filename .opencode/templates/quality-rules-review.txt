@@ -39,16 +39,10 @@ Anti-shortcut thoughts (slow down if any of these appear in your reasoning):
 - "This matches a known pattern" → matching a pattern ≠ proving the issue exists. Verify before filing
 - "The prior report says this is the issue" → findings are directions to investigate, not established facts. Read the cited code and context yourself; run your own greps. The prior agent may have miscited the line, misread the code, or missed guards that invalidate the claim. Source of truth: the code on disk + your own command output — never a prior agent's claims about either
 
-TOOL OUTPUT EFFICIENCY:
+TOOL OUTPUT EFFICIENCY (output budgets + concurrency: see the Tool output & concurrency table, `AGENTS.md` → Tool-use policy):
 
 Read:
-- Use offset/limit for a specific function/section; read the full file for systematic audits, cross-file tracing, or first sight of the code.
-
-Bash:
-- Routine commands (ls, pwd, which, git status, echo): output is short, use as-is.
-- Build/test/lint: save full output to a temp file; show summary only (pass/fail counts, warnings); on failure include all failure details + last 40 lines. If you need the raw output later, read it from the saved file.
-- Install commands (pip, npm, cmake): keep the last 15 lines + any errors.
-- Diagnostic/investigative commands: use `2>&1 | tail -40`. If you need the full output, read it from the saved file.
+- Read the full file for systematic audits, cross-file tracing, or first sight of the code.
 
 Re-reading files:
 - Avoid re-reading files you already read this session; trust what you saw.

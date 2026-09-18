@@ -481,6 +481,25 @@ R5. Output discipline
 R6. Anti-over-engineering
   No script for one thing a dedicated tool or one trivial command does.
 
+### Tool output & concurrency (single source — lead and agents)
+
+Each tool/command declares two things: how much output enters context, and whether it may run alongside other agents.
+
+- **Output budget:** `inline` (short, as-is) · `artifact` (full output → file, inline a summary/stub + path) · `N lines` (cap).
+- **Concurrent-safe:** `yes` · `no` (solo only) · `conditional`.
+
+| Category | Output budget | Concurrent-safe |
+|---|---|---|
+| File read / search (`read`, `grep`, `glob`) | inline; slice with offset/limit; trim hit lists | yes |
+| File edit / write | diff/confirmation only | different files: yes · same file: no |
+| Shell — read-only (status, diff, list, search, small reads) | inline | yes |
+| Shell — build / test / lint | artifact; inline pass/fail counts + failures + last 40 lines | **no** — solo for the full build/suite; targeted checks of your own change are parallel-safe |
+| Shell — install / env-mutating | artifact; inline last 15 lines + errors | **no** |
+| Shell — diagnostic | inline `2>&1 \| tail -40` | read-only: yes · else no |
+| Web fetch / search | digest or path inline; full page/report → artifact file | **no** — sequential (rate limits) |
+
+Follow this table for output budgets and concurrency; the quality rules' reading-strategy and verification rules stand.
+
 ## Error Handling
 
 | Scenario | Action |
