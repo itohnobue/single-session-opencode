@@ -1,6 +1,6 @@
 # Single-Session OpenCode
 
-A single-session agent suite for [OpenCode](https://opencode.ai): the model does the work itself in dialog with you, and calls in specialized subagents when the work is big or context-heavy. No orchestration pipeline. Works with any LLM provider.
+A single-session agent suite for [OpenCode](https://opencode.ai) (v1 & v2): the model does the work itself in dialog with you, and calls in specialized subagents when the work is big or context-heavy. No orchestration pipeline. Works with any LLM provider.
 
 ## Quick Start
 
@@ -12,13 +12,6 @@ cd single-session-opencode
 ```
 
 The installer copies `.opencode/` (agents, tools, templates, skills, plugin), `AGENTS.md`, and a minimal `opencode.json` into your project — an existing `AGENTS.md` or `opencode.json` is never overwritten. Open the project with OpenCode and the suite is active.
-
-## OpenCode V1 & V2
-
-The suite is **universal**: the same files run on OpenCode **V1 (1.18.29+)** and **V2 (2.0+)**.
-
-- **Config, agents, commands, skills, `AGENTS.md`** are authored in the V1 shape; V2 normalizes V1 configuration in memory. No duplication needed.
-- **The local plugin** (`.opencode/plugin/fix-prompt.js`) uses a dual entrypoint — `server()` for V1 and `setup(ctx)` for V2 — so one file works on both. V1 support requires **1.18.29+** (the installer warns below that floor).
 
 ## Default allowance
 
