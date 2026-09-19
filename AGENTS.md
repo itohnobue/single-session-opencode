@@ -1,10 +1,14 @@
 # Single-Session OpenCode
 
-## Workflow Files — No Changes Without an Explicit Command
+## Temporary Files
 
-Workflow files: `AGENTS.md`, `.opencode/` (agents, templates, tools, plugin), and the install/config files (`install.sh`, `install.ps1`, `opencode.json`, `README.md`).
+You can use the `tmp/` subfolder in the current project folder to save temporary files — intermediate results, reports, or data during multi-step work.
 
-NEVER create, edit, move, rename, or delete one without an explicit user command naming the file or the change. General tasks ("update the workflow", "sync the repos", "audit AGENTS.md"), prior sessions, and side effects of other tasks do not grant it. Reading is always allowed — report and propose instead.
+**Path resolution:** All `tmp/` paths resolve to `$REPO_ROOT/tmp/` where `$REPO_ROOT` is the absolute path to the repository root (the directory where `opencode` was launched). Always reference `tmp/` paths relative to `$REPO_ROOT`.
+
+`tmp/uv/` is reserved for the local uv installation (tool-use policy R3).
+
+---
 
 ## Operating notes
 
@@ -13,14 +17,11 @@ On Windows:
 
 ---
 
+## Workflow Files — No Changes Without an Explicit Command
 
-## Temporary Files
+Workflow files: `AGENTS.md`, `.opencode/` (agents, templates, tools, plugin), and the install/config files (`install.sh`, `install.ps1`, `opencode.json`, `README.md`).
 
-You can use the `tmp/` subfolder in the current project folder to save temporary files — intermediate results, reports, or data during multi-step work.
-
-**Path resolution:** All `tmp/` paths resolve to `$REPO_ROOT/tmp/` where `$REPO_ROOT` is the absolute path to the repository root (the directory where `opencode` was launched). Always reference `tmp/` paths relative to `$REPO_ROOT`.
-
-`tmp/uv/` is reserved for the local uv installation (tool-use policy R3).
+NEVER create, edit, move, rename, or delete one without an explicit user command naming the file or the change. General tasks ("update the workflow", "sync the repos", "audit AGENTS.md"), prior sessions, and side effects of other tasks do not grant it. Reading is always allowed — report and propose instead.
 
 ---
 
