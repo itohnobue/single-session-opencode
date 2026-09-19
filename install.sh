@@ -43,7 +43,7 @@ Usage:
 
 What it does:
   1. Checks that OpenCode CLI is installed and in PATH
-  2. Copies .opencode/ directory (agents, tools, templates, skills) to your project
+  2. Copies .opencode/ directory (agents, tools, templates, skills, plugin) to your project
   3. Creates AGENTS.md with single-session workflow instructions
   4. Creates opencode.json with default allowance (skipped if one exists)
   5. Creates tmp/ directory for agent working files
@@ -105,6 +105,17 @@ main() {
     esac
   fi
 
+  # Version gate: the local plugin uses a dual V1/V2 entrypoint
+  # (V1 server() + V2 setup()), which V1 exposes only from 1.18.29 onward.
+  local oc_version
+  oc_version="$(opencode --version 2>/dev/null | head -1 || true)"
+  if [[ "$oc_version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
+    local maj="${BASH_REMATCH[1]}" min="${BASH_REMATCH[2]}" pat="${BASH_REMATCH[3]}"
+    if (( maj == 1 )) && (( min < 18 || (min == 18 && pat < 29) )); then
+      warn "OpenCode $oc_version predates 1.18.29 — the dual V1/V2 plugin will not load there; upgrade V1 or keep a legacy plugin build"
+    fi
+  fi
+
   # ── Step 2: Copy .opencode/ ──
   step "Installing .opencode/ directory"
 
@@ -128,6 +139,14 @@ main() {
   else
     cp -R "$SCRIPT_DIR/.opencode" "$target/.opencode"
     info "Installed .opencode/ directory"
+  fi
+
+  # Remove the legacy plural plugin location (older suite versions shipped plugins/).
+  # V2 discovers BOTH plugin/ and plugins/; a stale duplicate plugin (same id) fails to load.
+  if [[ -f "$target/.opencode/plugins/fix-prompt.js" ]]; then
+    rm -f "$target/.opencode/plugins/fix-prompt.js"
+    rmdir "$target/.opencode/plugins" 2>/dev/null || true
+    info "Removed legacy plugin copy at .opencode/plugins/fix-prompt.js"
   fi
 
   # Ensure all .sh scripts are executable (fixes macOS clone without +x)
@@ -182,6 +201,7 @@ main() {
   printf '    .opencode/tools/      Research & memory tools\n'
   printf '    .opencode/templates/  Agent prompt boilerplate\n'
   printf '    .opencode/skills/     Workflow skills\n'
+  printf '    .opencode/plugin/     Local plugin (dual V1/V2 entrypoint)\n'
   printf '    AGENTS.md             Single-session workflow instructions\n'
   printf '    opencode.json         Default allowance (permission allow, no model pin)\n'
   printf '    tmp/                  Agent working directory\n'

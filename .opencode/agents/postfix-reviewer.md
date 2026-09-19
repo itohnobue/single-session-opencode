@@ -1,19 +1,12 @@
 ---
 description: "Postfix-reviewer — the post-fix review agent. Used ONLY for post-fix review: verifies an applied fix against its design (correctness, minimality, new bugs, test breakage, race conditions; verdict APPROVED / NEEDS-FIX). Strictly read-only — never edits code. Never used for initial reviews, discovery, implementation, fixes, or second opinions — those run via executor."
 mode: subagent
-tools:
-  read: true
-  write: true
-  edit: false
-  bash: true
-  grep: true
-  glob: true
-  websearch: false
-  webfetch: false
 permission:
-  edit: deny
+  edit: allow
   bash:
     "*": allow
+  websearch: deny
+  webfetch: deny
 ---
 
 # Postfix Reviewer

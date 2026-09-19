@@ -11,11 +11,18 @@ cd single-session-opencode
 # or: .\install.ps1 C:\path\to\project   (Windows)
 ```
 
-The installer copies `.opencode/` (agents, tools, templates, skills), `AGENTS.md`, and a minimal `opencode.json` into your project — an existing `AGENTS.md` or `opencode.json` is never overwritten. Open the project with OpenCode and the suite is active.
+The installer copies `.opencode/` (agents, tools, templates, skills, plugin), `AGENTS.md`, and a minimal `opencode.json` into your project — an existing `AGENTS.md` or `opencode.json` is never overwritten. Open the project with OpenCode and the suite is active.
+
+## OpenCode V1 & V2
+
+The suite is **universal**: the same files run on OpenCode **V1 (1.18.29+)** and **V2 (2.0+)**.
+
+- **Config, agents, commands, skills, `AGENTS.md`** are authored in the V1 shape; V2 normalizes V1 configuration in memory. No duplication needed.
+- **The local plugin** (`.opencode/plugin/fix-prompt.js`) uses a dual entrypoint — `server()` for V1 and `setup(ctx)` for V2 — so one file works on both. V1 support requires **1.18.29+** (the installer warns below that floor).
 
 ## Default allowance
 
-The shipped `opencode.json` sets only `permission: allow` — **no model pin**: the model and provider come from your machine's global OpenCode config (`~/.config/opencode/opencode.json`). Edit the project `opencode.json` for a per-machine override. Reasoning effort is configured in the global config (agents do not pin their own).
+The shipped `opencode.json` sets only the V1 shorthand `"permission": "allow"` (V2 normalizes it) — **no model pin**: the model and provider come from your machine's global OpenCode config (`~/.config/opencode/opencode.json`). Edit the project `opencode.json` for a per-machine override. Reasoning effort is configured in the global config (agents do not pin their own).
 
 ## How it works
 
@@ -45,7 +52,7 @@ The shipped `opencode.json` sets only `permission: allow` — **no model pin**: 
 
 ## Requirements
 
-- [OpenCode CLI](https://opencode.ai)
+- [OpenCode CLI](https://opencode.ai) — **V1 1.18.29+** or **V2 2.0+**
 - At least one LLM provider configured in `~/.config/opencode/opencode.json`
 - `uv` — auto-installed repo-locally into `tmp/uv/` if missing (never system-wide, per the AGENTS.md tool-use policy); handles Python dependencies for the tools
 

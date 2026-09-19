@@ -1,19 +1,12 @@
 ---
 description: Adversarial reviewer — the single falsification quality gate. Tries to FALSIFY findings from review/audit stages. Reads cited source code, searches exhaustively for counter-evidence, and labels each finding CONFIRMED/REJECTED/WEAKENED following the unified verification vocabulary. Findings surviving exhaustive adversarial falsification become ADVERSARIALLY VERIFIED. Batch sizes by severity (CRITICAL 1:1, HIGH 1:3, MEDIUM 1:10) are volume controls.
 mode: subagent
-tools:
-  read: true
-  write: true
-  edit: false
-  bash: true
-  grep: true
-  glob: true
-  websearch: false
-  webfetch: false
 permission:
-  edit: deny
+  edit: allow
   bash:
     "*": allow
+  websearch: deny
+  webfetch: deny
 ---
 
 # Adversarial Reviewer

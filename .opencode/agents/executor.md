@@ -1,19 +1,12 @@
 ---
 description: "Executor agent — the single executor for all work types and tiers. Runs may be T1 plain (the task file's context is the briefing, no research) or T2/T3 with a RESEARCH DATA briefing section (the research digest + FULL RESEARCH REPORT path) — produced by the prepare agent, mandatory in T2/T3 runs (coordination template → RESEARCH DATA → task). Read the file, use the research data if present as your briefing, execute the task, write the report. Post-fix reviews run via the postfix-reviewer agent. No web research of its own."
 mode: subagent
-tools:
-  read: true
-  write: true
-  edit: true
-  bash: true
-  grep: true
-  glob: true
-  websearch: false
-  webfetch: false
 permission:
   edit: allow
   bash:
     "*": allow
+  websearch: deny
+  webfetch: deny
 ---
 
 # Executor Agent

@@ -1,19 +1,12 @@
 ---
 description: Expert data researcher for discovering, collecting, and analyzing diverse data sources. Specializes in data mining, pattern recognition, and extracting actionable insights from complex datasets. Use for data discovery, source evaluation, or exploratory analysis.
 mode: subagent
-tools:
-  read: true
-  write: true
-  edit: false
-  bash: true
-  grep: true
-  glob: true
-  websearch: false
-  webfetch: false
 permission:
-  edit: deny
+  edit: allow
   bash:
     "*": allow
+  websearch: deny
+  webfetch: deny
 ---
 
 # Data Researcher

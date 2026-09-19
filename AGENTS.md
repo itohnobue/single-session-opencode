@@ -22,7 +22,7 @@ You can use the `tmp/` subfolder in the current project folder to save temporary
 
 8 agents for OpenCode, built around the **tiered executor pipeline** (tiers and delegation rules below). Agents are stored in `.opencode/agents/` as Markdown files with YAML frontmatter. Full directory: `.opencode/agents/INDEX.md` — read it before delegating.
 
-**Reasoning effort** is configured in the global OpenCode config (model option `reasoningEffort`) — agents do not pin their own.
+**Reasoning effort** is configured in the global OpenCode config (V1: model option `reasoningEffort`; V2: model `settings.reasoningEffort` — and note the root `model` does not retain a `#variant`, so set the default on the model, not the root selector) — agents do not pin their own.
 
 | Agent | Role |
 |-------|------|
