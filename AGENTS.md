@@ -375,16 +375,18 @@ Multiple CLI instances work without conflicts. Resolution: `-S` flag > `MEMORY_S
 
 **Deep research:** for large multi-query research tasks, delegate to the matching research agent — see **Research tasks** under Agent Delegation for the rule and the agent list.
 
-### Research Confidence Tiers
+### Research Confidence — calibration, not labels
 
-When presenting research findings, state their confidence tier on each key claim (e.g., "CONFIRMED: …", "LIKELY: …"). Do NOT present research findings as established facts unless they are CONFIRMED (≥2 independent sources agree).
+Report research as plain prose and carry confidence in the wording, not in tags: "several independent sources report…", "a single unverified account claims…", "the evidence is mixed". Do not prefix claims with confidence labels — labels are governed by Reporting labels.
+
+The four levels are the internal calibration for that wording; never state a single-source or inferential claim as established fact:
 
 - **CONFIRMED** — ≥2 independent sources agree on the fact
 - **LIKELY** — one solid source, or multiple weaker ones consistent
 - **TENTATIVE** — single source, plausibility uncertain
-- **SPECULATIVE** — inference beyond the sources; clearly label as such
+- **SPECULATIVE** — inference beyond the sources
 
-This is especially important when research conflicts with the user's assumptions or when the information will drive code changes.
+State a level explicitly (in prose, not as a tag) only when the sources conflict, when a claim the answer or decision rests on is single-source or uncertain, when the finding contradicts the user's assumption, when it will drive code changes, or when the user asks.
 
 **≥2 independent sources — and independence means provenance, not URL count:** group sources by origin before counting — syndicated copies, wire stories, press-release derivatives, one benchmark copied across posts — origin = one evidence line, however many URLs it spans. A claim backed by one line repeated across many URLs stays at LIKELY. Pair evidence types when clear: a user complaint (community) plus the official mechanism that explains it (policy text) beats either alone.
 
@@ -535,6 +537,10 @@ Follow this table for output budgets and concurrency; the quality rules' reading
   ~30 MB re-download on the next use)
 - Save non-trivial discoveries to knowledge and task state to session — after serious work, run the **Knowledge Harvesting step** (see Memory System); track current task state via `memory.sh session add`
 
+### Reporting labels — applicable only
+
+Classification labels are output formats, not answer decorations. Apply a label only when the reported content genuinely carries that classification — assessed findings and their risk levels, or claims whose evidence strength or disagreement matters. A plain answer to a plain question stays plain prose: no labels, no tier tags. This governs every label family, confidence and severity alike.
+
 ### Reporting severity
 
 When reporting problems or findings to the user, rate their severity so the user can prioritize:
@@ -547,4 +553,4 @@ When reporting problems or findings to the user, rate their severity so the user
 | **High** | Core product function, data mutation, wide blast radius. |
 | **Critical** | Permanent harm possible — destruction of pre-existing assets, data loss that cannot be recovered, secret exposure, auth bypass. |
 
-Label findings with their severity (e.g., "HIGH: …") when reporting more than one issue or when anything is at MEDIUM+.
+Label findings with their severity (e.g., "HIGH: …") when reporting more than one assessed issue or when anything is at MEDIUM+ — ordinary answers carry no severity labels.
