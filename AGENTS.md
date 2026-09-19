@@ -1,5 +1,11 @@
 # Single-Session OpenCode
 
+## Workflow Files — No Changes Without an Explicit Command
+
+Workflow files: `AGENTS.md`, `.opencode/` (agents, templates, tools, plugin), and the install/config files (`install.sh`, `install.ps1`, `opencode.json`, `README.md`).
+
+NEVER create, edit, move, rename, or delete one without an explicit user command naming the file or the change. General tasks ("update the workflow", "sync the repos", "audit AGENTS.md"), prior sessions, and side effects of other tasks do not grant it. Reading is always allowed — report and propose instead.
+
 ## Operating notes
 
 On Windows:
