@@ -84,6 +84,7 @@ Rules: terse bullets; exact paths, commands, identifiers, and numbers preserved;
 - One handoff per replacement (Mode A) or per task (Mode B), written by the party with live context (retiring run in Mode A, main model in Mode B).
 - Delete the saved handoff state once restoration is complete — the restored live state supersedes the handoff; a leftover handoff risks a false resume (see Consuming a handoff).
 - When the workflow tracks agent `task_id`s, list completed and in-flight ids in `## Critical Context` — a replacement lead resumes incomplete runs instead of redoing them.
+- Mode B handoffs carry the run's Change Spec verbatim (`tmp/glm-plan.md` Change Spec section: Intent, Non-Goals, `AC-n` criteria, Definition of Done) whenever a plan exists — the plan file is tmp and may not survive the session.
 - Paths are literal: Mode A `tmp/<retiring-name>-handoff.md`, Mode B `tmp/handoff-<slug>.md` — never `{NAME}` in a successor's task file (see the Mode A path rule).
 - "Handoff" is the term everywhere — no "continuation summary" / "handoff summary" variants.
 - Handoff files are never matched by the tmp cleanup globs — they survive the routine sweep and are removed only deliberately: on full restore (both modes), or on task completion when no restoration happened (see Consuming a handoff).
