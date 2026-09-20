@@ -65,7 +65,7 @@ REPORT FORMAT:
 Scope = in-scope / out-of-scope against the brief's out-of-scope line.
 [For each HIGH/CRITICAL: include confidence level + verification evidence (what you checked and found)]
 ### Investigated-and-Rejected
-[Items you checked and dismissed — reasoning + file:line. These are re-examined adversarially.]
+[Items you checked and dismissed — reasoning + file:line. HIGH/CRITICAL-claim dismissals are re-examined adversarially; all dismissals are recorded.]
 ### Fix Design (investigative/T3 reviews)
 [Per FIXABLE finding: exact root cause + a MINIMAL surgical fix design (5-15 lines); verdict FIXABLE / EXCLUDE with justification.]
 ### MUST ANSWER Responses
