@@ -4,11 +4,11 @@ Mandatory verification before claiming (skip = finding auto-rejected):
 - Before "X has no tests": grep test files containing X (e.g. *Test*.cs, test_*.py, *_test.go); paste test-method count
 - Before "X works correctly": quote the exact code that proves it
 - Before "missing protection": search for existing guards (try/catch, validation, decorators) — paste grep results
-- Before CRITICAL/HIGH: check reachability (grep for callers); DO NOT suppress findings just because proof is hard — report with confidence level (CONFIRMED / LIKELY / POSSIBLE) instead
+- Before filing ANY finding (every severity): check reachability — grep for callers and state the production path that reaches the defect in one line. If you have grepped and no caller/trigger exists (dead or unwired code), mark the finding LATENT and rate it no higher than LOW (adversarial may correct upward). If reachability cannot be determined, keep the finding and state confidence (CONFIRMED / LIKELY / POSSIBLE) — never suppress it.
 
 Core rules:
 - Read every file BEFORE making claims about it
-- Every finding MUST include file:line, code snippet, severity, and supporting grep evidence
+- Every finding MUST include file:line, code snippet, severity, supporting grep evidence, a one-line reachability/trigger statement, and a mechanism class (e.g. validation gap, state-machine ordering, dispatch gap, cross-module divergence, error swallowing)
 - Follow existing patterns and conventions
 - Cannot determine → "UNABLE TO DETERMINE", do NOT guess
 - Do NOT expand scope beyond task

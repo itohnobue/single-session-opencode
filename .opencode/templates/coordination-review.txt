@@ -60,10 +60,11 @@ REPORT FORMAT:
 [2-3 sentences: scope covered, issue counts by severity]
 ### Findings
 [ONLY actual issues — do NOT list "no issue found" confirmations here]
-| # | Severity | File:Line | Scope | Description |
-|---|----------|-----------|-------|-------------|
+| # | Severity | File:Line | Scope | Reachability/Trigger | Description |
+|---|----------|-----------|-------|----------------------|-------------|
 Scope = in-scope / out-of-scope against the brief's out-of-scope line.
-[For each HIGH/CRITICAL: include confidence level + verification evidence (what you checked and found)]
+Reachability/Trigger = one line: the production path that reaches the defect, or `LATENT` when no reachable trigger exists (severity ≤ LOW).
+[Every finding: include its verification evidence (what you checked and found); for HIGH/CRITICAL also the confidence level (CONFIRMED / LIKELY / POSSIBLE)]
 ### Investigated-and-Rejected
 [Items you checked and dismissed — reasoning + file:line. HIGH/CRITICAL-claim dismissals are re-examined adversarially; all dismissals are recorded.]
 ### Fix Design (investigative/T3 reviews)
