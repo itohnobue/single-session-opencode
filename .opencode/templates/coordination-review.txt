@@ -60,8 +60,9 @@ REPORT FORMAT:
 [2-3 sentences: scope covered, issue counts by severity]
 ### Findings
 [ONLY actual issues — do NOT list "no issue found" confirmations here]
-| # | Severity | File:Line | Description |
-|---|----------|-----------|-------------|
+| # | Severity | File:Line | Scope | Description |
+|---|----------|-----------|-------|-------------|
+Scope = in-scope / out-of-scope against the brief's out-of-scope line.
 [For each HIGH/CRITICAL: include confidence level + verification evidence (what you checked and found)]
 ### Investigated-and-Rejected
 [Items you checked and dismissed — reasoning + file:line. These are re-examined adversarially.]
