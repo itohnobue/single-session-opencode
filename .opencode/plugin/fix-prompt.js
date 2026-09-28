@@ -18,7 +18,7 @@
 // fails to load with an error. A valid V2 plugin with an empty `setup()` is how we
 // get "works on V1, does nothing on V2" without V2 load errors.
 //
-// Source of truth: single-session-opencode. Users never edit this by hand.
+// Source of truth: single-session-opencode. orchestrator-opencode holds an identical copy, kept in sync via the local sync-shared-tools skill. Users never edit this by hand.
 
 const REMOVALS = [
   // --- Output suppression ---

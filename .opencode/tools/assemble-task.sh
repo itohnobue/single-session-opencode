@@ -21,10 +21,11 @@
 #                     Escape: `{{NAME}}` in the task file stays a LITERAL `{NAME}`
 #                     (single-brace `{NAME}` is substituted with the agent name).
 #                     `$REPO_ROOT/tmp/` and `${REPO_ROOT}/tmp/` references are left as written.
-#   --research-file   (repeatable) Path to the briefing DIGEST — produced by the prepare agent
-#                     (MANDATORY in T2/T3 runs — no lead-curated substitute) — injected as the
-#                     `## RESEARCH DATA` section between template and task (T2/T3 runs;
-#                     omit for T1 when the task file's own context is the briefing)
+#   --research-file   (repeatable) Path to the research DIGEST — produced by the research
+#                     stage (the prepare agent in the single-session workflow; MANDATORY in
+#                     T2/T3 and researched runs — no lead-curated substitute) — injected as
+#                     the `## RESEARCH DATA` section between template and task (omit for
+#                     PLAIN/T1 runs when the task file's own context is the briefing)
 #   --research-report (repeatable) Path to the briefing's full report file (no size cap; same producers
 #                     as --research-file) — an authoritative `FULL RESEARCH REPORT:` path
 #                     line is printed under the digest header; the executor reads/greps the
@@ -36,6 +37,7 @@
 #   code:     coordination-code   +                  quality-rules-code
 #   research: coordination-review +                  quality-rules-review
 #   prepare:  coordination-prepare +                 quality-rules-review
+#             (prepare serves the single-session-workflow skill; the orchestrator pipeline does not use this type)
 #
 # Output (stdout):
 #   ASSEMBLED|name|output_path|bytes
@@ -205,7 +207,7 @@ mkdir -p "$OUT_DIR"
   # before the task (structure: template → RESEARCH DATA → task).
   if [[ ${#RESEARCH_FILES[@]} -gt 0 ]]; then
     printf '%s\n' '## RESEARCH DATA (your briefing — compact digest)'
-    printf '%s\n\n' 'This is the research DIGEST for this task — your map of the briefing data (produced by the prepare agent — mandatory in T2/T3 runs). Use it; do not redo the research. Shape your working form from it before starting the task.'
+    printf '%s\n\n' 'This is the research DIGEST for this task — your map of the briefing data (produced by the research stage — the prepare agent in the single-session workflow; mandatory in T2/T3 and researched runs). Use it; do not redo the research. Shape your working form from it before starting the task. Your task'\''s PRIOR CONTEXT and MUST ANSWER take precedence over this section.'
     for _rr in "${RESEARCH_REPORTS_ABS[@]}"; do
       printf 'FULL RESEARCH REPORT: %s\n' "$_rr"
     done
@@ -240,8 +242,8 @@ mkdir -p "$OUT_DIR"
   # Auto-inject the report-path directive (source read/write scope is defined
   # by the coordination rules).
   printf '%s\n' '--- WRITABLE FILES (automatic) ---'
-  printf 'Write your report to EXACTLY `%s/tmp/%s-report.md` UNLESS the task file has a DELIVERABLES section specifying explicit report paths — then use those.\n' "$REPO_ROOT" "$NAME"
-  printf '%s\n' '(This is your working directory. NOT the PROJECT directory.)'
+  printf 'You must write your report to EXACTLY `%s/tmp/%s-report.md` UNLESS the task file has a DELIVERABLES section specifying explicit report paths — then use those.\n' "$REPO_ROOT" "$NAME"
+  printf '%s\n' '(This is your workflow working directory. NOT the PROJECT directory.)'
   printf '\n'
 } > "$OUTPUT"
 
