@@ -53,23 +53,30 @@ This is a single-session agent suite — NOT an orchestration pipeline. Subagent
 ### How it works
 
 1. **The model does the work directly.** The main model is the sole worker. It reads code, writes code, runs commands, verifies results, and delivers — all in the current session.
-2. **The model solves most work directly.** Subagents are the exception, not the default: the model spawns one only when the subtask is big and heavy or needs lots of context to execute (see Agent Delegation) — and it makes that call itself, on sight.
+2. **The model solves most work directly.** Subagents are the exception, not the default: the model spawns one only when the subtask is big and heavy or needs lots of context to execute (see Delegation Rules) — and it makes that call itself, on sight.
 3. **The user works alongside the model.** The user interjects, redirects, asks questions, or assigns new tasks at any point mid-session. The model responds immediately — there is no "stage boundary" to respect.
 4. **Tasks are single-session sized.** This suite is for focused, self-contained tasks the model can complete in one session with the user. It is not for orchestrator-level multi-stage productions.
 
 ---
 
-## Agent Delegation (tiered executor pipeline)
+## Delegation Rules (tiered executor pipeline)
 
 **The main session is the primary worker** — it solves most work directly, in dialog with the user. Delegation is the exception, chosen by judgment: delegate when the task fits the criteria below. Trivial work (quick answers, small edits, questions, routine changes) never touches agents.
 
 **Use existing agents directly only on a 100% fit.** A task is solved with a single direct agent call ONLY when an existing agent fully matches the job — a substantial research question → the research agent matching its type (`web-searcher` / `research-analyst` / `data-researcher`, see Research tasks below); quick/simple lookups stay in-session with `web_search.sh` — lookup itself is never an agent job; verifying a claim or finding → `adversarial-reviewer`. This is a shortcut for genuinely matching jobs, not a license to route everything through agents: most tasks stay in the session, and if the fit isn't 100%, the path below applies.
+
+**Routing order:** (1) session work → main model directly; (2) an existing agent is a 100% fit → a single direct agent call, no prepare+execute; (3) otherwise → a full delegated run at the tier the context rule below selects. Second-opinion runs use a research-backed s2.
 
 **When to delegate:**
 1. **No 100%-fit existing agent** exists for the job (the job needs a custom specialist — per-tier: plain executor for T1, research generation plus a dedicated executor for T2/T3).
 2. The task is **big and heavy** — a deep audit/review, a large refactor, a complex cross-module analysis, an unfamiliar domain, a non-trivial implementation (a real feature/module/subsystem — not a one-liner, not a routine edit).
 3. The task **needs lots of context to execute** — more than ~20% of a 1M-token context window (reading large codebases, very long files, many files): the subagent absorbs that in its own isolated context, returning a compact result.
 4. The task **touches current external facts** (versions, APIs, ecosystem behavior, format specs, security advisories) where fresh research materially improves the *report quality* — research is a QUALITY input (precision, breadth), and in T2/T3 additionally the FACT SUPPLIER: prepared research supplies any fact the run depends on, since the lead's inline completeness is not trusted. (Scale qualifier: a small task that just needs a quick lookup is solved in-session with `web_search.sh` — no delegation.)
+
+**Do NOT spawn when:**
+- The work is simple, well-understood, or would take more coordination than doing it directly
+- The model can produce a correct result itself without excessive context use — delegation adds overhead, not quality
+- The only benefit would be perceived parallelism or "using the machinery" — there is no quota and no obligation to spawn
 
 **The context rule (the ONE general principle all patterns build upon):**
 Plain (no research) is used ONLY when the task file already carries rich context — the facts the executor needs (contracts, specs, environment, expected behaviors) are stated in PRIOR CONTEXT or were already researched into it. The rule gates T1 only: when the task file is thin and the task depends on facts it does not carry (current external facts: versions, APIs, ecosystem behavior, format specs, security advisories), research is injected to supply what the context lacks. **In T2/T3 the rule does not decide — research is MANDATORY:** a prepare-agent spawn runs for every researched delegation, no lead judgment. This rule applies to every run below; for second-opinion runs the primary is always researched (T3 tier — see Second-opinion rules).
@@ -121,7 +128,7 @@ Split sub-runs keep their own task files and report paths; each is a separate de
 
 ### VERIFY (optional block — critical issues, acted-on findings, or on demand)
 
-Verification is NOT automatic — routine trivial session work is covered by self-review and tests. Run it when: (a) the work is critical/high-risk (production-critical changes, security-sensitive code, irreversible operations); (b) a findings-type task's results will be acted on (triage/fix pipelines, user-facing reviews); (c) the user asks, or judgment says the work needs falsification. The block — one agent per stage, with an adversarial reviewer per VERIFY block (see step 2); with many issues, each issue gets its own VERIFY block with its own agents (respect the parallel-spawn rules; batching multiple issues into one agent run is OK as long as the overall volume to process stays under the general per-agent volume cap (5K LOC / 25 files — see Task splitting above)):
+Verification is NOT automatic — routine trivial session work is covered by self-review and tests. Run it when: (a) the work is critical/high-risk (production-critical changes, security-sensitive code, irreversible operations); (b) a findings-type task's results will be acted on (triage/fix pipelines, user-facing reviews); (c) the user asks, or judgment says the work needs falsification. Outside the block, the model may also run a quick adversarial pass on its own work anytime when judgment says the work is high-risk. The block — one agent per stage, with an adversarial reviewer per VERIFY block (see step 2); with many issues, each issue gets its own VERIFY block with its own agents (respect the parallel-spawn rules; batching multiple issues into one agent run is OK as long as the overall volume to process stays under the general per-agent volume cap (5K LOC / 25 files — see Task splitting above)):
 
 1. **REVIEW** — one `executor` (type `review`) per issue (a finding IS an issue): each finding gets its own review run that validates it — root cause, evidence, severity labels (for findings-type deliverables). For implementation deliverables, the review reviews the changes and files severity-labeled findings — each filed finding then becomes an issue of its own with its own block. **The review verifies the deliverable against the brief across three dimensions (see the review template): completeness (every brief-promised deliverable enumerated and verified — absence is a HIGH finding), correctness (claims verified with evidence), coherence (stated brief decisions reflected in the delivery).** **LOW findings are dropped — only MEDIUM+ findings are processed.** **If the review produced no MEDIUM+ findings, the VERIFY block ends here** — nothing left to falsify or fix. (Findings-heavy blocks — merged second-opinion outputs, multi-report audits with 15+ findings — may route through `verification-analyst` (extraction — process-only, independent of research data) first: dedup + both-found/single-found tags + PRIOR_FIX_ATTEMPT regression tags + investigated-and-rejected routing + batch assignment table, dropping LOWs there; the adversarial stage then runs its batches exactly per that table. The caps (CRITICAL 1:1 · boundary HIGH 1:1 · HIGH ≤3 · MEDIUM ≤10) are the extraction's responsibility; if a batch exceeds a cap, the main model splits it mechanically (splitting is allowed; merging over a cap is not) and records it as an extraction defect — it does not re-group findings across batches.)
 2. **ADVERSARIAL** — one adversarial reviewer per VERIFY block — `adversarial-reviewer`: the single distinct quality gate. Batch sizes follow severity (CRITICAL 1:1, HIGH 1:3, MEDIUM 1:10 — many MEDIUM findings in one block may run as multiple adversarial runs, one batch each): these are volume controls. Issues may be batched into one adversarial run under that cap; above it, split per issue. A single adversarial run falsifies that issue's MEDIUM+ review claims — false positives get REJECTED, overstated ones WEAKENED with the correct severity; and **challenges the reviewer's "investigated-and-rejected" list** for that issue, not just the filed findings. On merged second-opinion outputs, prioritize the UNIQUE findings (primary-only and s2-only, per the s2's uniqueness statement) — the both-found core is already double-verified by two independent opinions. Runs STANDALONE — no second-opinion pair (second opinions belong to findings/research/review stages, not to the adversarial verification itself). The adversarial reviewer tries to FALSIFY the work: it reads the deliverable with full surrounding context, searches exhaustively for counter-evidence, errors, and missed edge cases, and reports what survives as CONFIRMED issues. Brief it with KEY FILES (the changed files / the deliverable), CONTEXT, and MUST ANSWER questions like: "Are there any bugs, edge cases, or regressions in this change? Is the change correct in all call paths?"
@@ -146,16 +153,6 @@ For T3 findings-type tasks (reviews, audits, discovery) whose deliverable feeds 
 - **Continue until clean:** each additional iteration is a fresh review run with a genuinely different FOCUS angle (complementary to the previous pass — no angle repeats; fresh prepare for the new angle), followed by its own full VERIFY block. The loop repeats until an iteration's grid shows no triggering (un-folded) CONFIRMED HIGH+ findings — that is convergence; the stage ends there immediately, regardless of task type, codebase cleanliness, or prior history.
 - **No fixed cap:** convergence is mechanical — there is no 3-pass or N-pass ceiling and no user cap. It converges ONLY on a pass with no triggering CONFIRMED HIGH+, never on a pass count.
 - **Relationship to the fix loop:** convergence governs REVIEW iterations (finding more bugs) — and the FIX stage within each block converges the same way (same mechanical trigger — see VERIFY step 4). Both loops are independent — a converged review stage with confirmed MEDIUM findings still fixes them; the fix loop does not re-fire review iterations. Folding is trigger-only — the FIX/CODE-FIX trigger stays raw and the fix scope keeps all confirmed findings (folded included).
-
-### Executor selection
-
-- `executor` — the single executor for ALL work types (implementation, execution, deep analysis, investigation); `postfix-reviewer` runs post-fix reviews.
-- The tier decides the assemble flags — see "Executor tiers" above: T1 runs use the same executor WITHOUT a briefing; T2/T3 runs carry one (`--research-file`/`--research-report`).
-
-### Adversarial — when
-
-- Part of the optional VERIFY block (trigger list in the VERIFY section above). NOT automatic after every delegation.
-- The model may also run a quick adversarial pass on its own work anytime (outside the block) when judgment says the work is high-risk.
 
 ### Completion Sanity Check (MANDATORY — lead; before knowledge harvesting)
 
@@ -183,19 +180,7 @@ MUST ANSWER: coverage mapping, file sizes, exclusions, confidence breakdown
 
 ---
 
-## Delegation Playbook
-
-### When to spawn a subagent
-
-**Decision order:** (1) session work → main model directly; (2) an existing agent is a 100% fit → single direct agent call, no prepare+execute — but only when the fit is really 100%, never as a default reflex; (3) otherwise → full delegated run with the tier chosen per the context rule (T1/T2/T3 — see Executor tiers under Agent Delegation); research-backed s2 for second-opinion runs.
-
-**Do NOT spawn when:**
-- The work is simple, well-understood, or would take more coordination than doing it directly
-- The model can produce a correct result itself without excessive context use — delegation adds overhead, not quality
-- The only benefit would be perceived parallelism or "using the machinery" — there is no quota and no obligation to spawn
-
-**Standing exception — research when needed:**
-- **Web research** — when external facts matter, the model researches instead of guessing (see Web Research section). Research is the standing exception to "solve it yourself": it is a judgment call, used when needed — the model does not guess facts it can verify online.
+## Delegation Operations
 
 ### How to spawn
 
@@ -207,19 +192,19 @@ All 8 agents are native opencode subagents, auto-loaded from `.opencode/agents/*
    ```bash
    .opencode/tools/assemble-task.sh -a executor -t TYPE -n {NAME} --task tmp/{NAME}-task.txt -o tmp/{NAME}-task-prompt.txt
    ```
-   Then go to step 5. Use T1 only when the task file carries every fact — anything depending on facts the file does not assert is a T2 run (step 3).
-3. **T2 run (researched — ALWAYS; the prepare spawn is mandatory):** assemble + delegate PREPARE: `assemble-task.sh -a prepare-agent -t prepare -n prepare-{NAME} --task tmp/{NAME}-prepare-task.txt`, then `task(subagent_type="prepare-agent")` → research files `tmp/prepare/{NAME}-research.md` (full report) + `tmp/prepare/{NAME}-digest.md` (digest). No gate step — the prepare agent self-reviews before delivery (see PREPARE); act only if its report flags remaining issues. (No lead-curated substitute; reuse a same-scope prepare output at the same assembly.)
+   Then go to step 5. (T1 only when the task file carries every fact — see the T1 tier for the test.)
+3. **T2 run (researched — ALWAYS; the prepare spawn is mandatory):** assemble + delegate PREPARE: `assemble-task.sh -a prepare-agent -t prepare -n prepare-{NAME} --task tmp/{NAME}-prepare-task.txt`, then `task(subagent_type="prepare-agent")` → research files `tmp/prepare/{NAME}-research.md` (full report) + `tmp/prepare/{NAME}-digest.md` (digest). No gate step — the prepare agent self-reviews before delivery (see PREPARE); act only if its report flags remaining issues.
 4. Assemble the EXECUTOR prompt (injection happens automatically):
    ```bash
    .opencode/tools/assemble-task.sh -a executor -t TYPE -n {NAME} --task tmp/{NAME}-task.txt --research-file tmp/prepare/{NAME}-digest.md --research-report tmp/prepare/{NAME}-research.md -o tmp/{NAME}-task-prompt.txt
    ```
-   Types: `code` / `review` / `research` (choose by work type). Produces `tmp/{NAME}-task-prompt.txt` with structure: template → RESEARCH DATA (digest + FULL RESEARCH REPORT path) → task.
+   Types: `code` / `review` / `research` (choose by work type). Output structure per ASSEMBLE above: template → RESEARCH DATA → task.
 5. Delegate via the `task` tool — pass the file path with a read-and-execute instruction, NOT the full content:
    ```
    task(description="<3-5 words>", prompt="Read this file. Strictly follow instructions there and execute the described task: tmp/{NAME}-task-prompt.txt", subagent_type="executor")
    ```
-6. **T3 — the full workflow** (any complex issue; findings tasks at MEDIUM+): PREPARE FIRST — the mandatory T3 prepare spawn (digest + full report, FOCUS per issue); every review brief is assembled WITH `--research-file`/`--research-report`. Then the T3 chain: review agents (the primary opinion) → research-backed s2 on the same scope → VERIFY block (step 7) → fix chain → COMPLETION SANITY CHECK → final KNOWLEDGE HARVESTING (main model) — see the T3 full workflow below.
-7. **OPTIONAL VERIFY block** (critical issues, acted-on findings, or on demand — see VERIFY under Agent Delegation): reviewer first; if the review produces no MEDIUM+ findings, the block ends there; otherwise adversarial → FIX → re-verify.
+6. **T3 — the full workflow** (any complex issue; findings tasks at MEDIUM+): PREPARE FIRST — the mandatory T3 prepare spawn (digest + full report, FOCUS per issue); every review brief is assembled WITH `--research-file`/`--research-report`. Then run the T3 chain — see the T3 full workflow below.
+7. **OPTIONAL VERIFY block** (critical issues, acted-on findings, or on demand — see VERIFY under Delegation Rules): reviewer first; if the review produces no MEDIUM+ findings, the block ends there; otherwise adversarial → FIX → re-verify.
 
 **Standalone use of agents outside the flow** (adversarial-reviewer, web-searcher, research-analyst, data-researcher, verification-analyst): assemble with their agent name and type — `assemble-task.sh -a adversarial-reviewer -t review -n ...`; research agents (`web-searcher` / `research-analyst` / `data-researcher`) use `-t research`, and `verification-analyst` uses `-t review`.
 
@@ -255,7 +240,7 @@ All 8 agents are native opencode subagents, auto-loaded from `.opencode/agents/*
 - Check the report exists and is non-empty — that's the primary gate
 - Read the report's findings and apply them to the main task
 - If an agent's output is wrong or incomplete: diagnose, fix the task, and re-spawn with corrections (see spawn discipline above)
-- Quality gates by pipeline stage: pre-spawn prompt check → prepare self-review → second-opinion flow (MEDIUM+) → optional VERIFY block (see VERIFY under Agent Delegation above).
+- Quality gates by pipeline stage: pre-spawn prompt check → prepare self-review → second-opinion flow (MEDIUM+) → optional VERIFY block (see VERIFY under Delegation Rules above).
 
 ### The T3 tier's full workflow — the standard flow for any complex issue (findings → fixed & verified)
 
@@ -272,10 +257,10 @@ The fix executor does NOT resume the review run that designed the fix: fix desig
 4. **POST-FIX REVIEW** (one `postfix-reviewer`, type `review`, per fix — strictly read-only) — verifies the applied diff against the original fix design: correctness, minimality, new bugs, test breakage, race conditions. Verdict **APPROVED / NEEDS-FIX**.
 5. **POST-FIX ADVERSARIAL** (ONLY if any post-fix review produced MEDIUM+ findings) — ONE adversarial reviewer per issue (`adversarial-reviewer` — a single run on that issue's post-fix findings). All clean → skip.
 6. **FINAL FIXES** — apply any confirmed post-fix findings (fresh executor run per finding), then re-review (via `postfix-reviewer`). Report the final picture to the user: finished & skipped issues, verdicts, and — for log-derived bugs — the project's UI smoke tests.
-7. **COMPLETION SANITY CHECK (MANDATORY — lead; before knowledge harvesting)** — enumerate the original objective, every MUST ANSWER, every promised deliverable, and every open todo/pending item; confirm produced evidence exists for each (file:line diff, exact command output, test result, artifact on disk — plans, summaries, effort, and "the executor reported success" do NOT count). Any uncovered/failed/open item → route it back to a fix run and re-check; do not report completion and do not harvest. Clean → proceed to harvest (see Completion Sanity Check under Agent Delegation).
-8. **KNOWLEDGE HARVESTING (final — the main model does it itself, no agents)** — runs once all work is done, when the run produced any CONFIRMED finding at MEDIUM+ (per synthesis grid or adversarial verdicts). If no CONFIRMED MEDIUM+ exists, skip — nothing to harvest. The main model: (1) reads all synthesis grids and findings/review reports from the run; (2) classifies each CONFIRMED finding **PATTERN** (lesson generalizes beyond this fix) vs **INCIDENT** (one-off); (3) for each PATTERN writes a `memory.sh add` entry (category `gotcha` or `pattern`, domain tags) plus a one-line prevention recommendation: mechanically preventable → CI test / lint rule / type-level / shared base; review-only → gotcha; neither → accept recurrence and budget for it; (4) writes `tmp/knowledge-harvest-report.md` — PATTERN/INCIDENT classification, entries added/deleted, prevention recommendations (kept through cleanup — the `rm` glob matches only `*-task-prompt.txt`/`*-task.txt`). **Delivery gate:** before reporting T3 completion, confirm the harvest ran (including the `knowledge.md` commit/push when the file is tracked) and the report exists when the trigger fired. (Search, dedup, old-entry checks, and the VCS commit/push follow the Memory System's Knowledge Harvesting procedure.)
+7. **COMPLETION SANITY CHECK (MANDATORY — lead; before knowledge harvesting)** — run the Completion Sanity Check (see Delegation Rules). Clean → proceed to harvest.
+8. **KNOWLEDGE HARVESTING (final — the main model does it itself, no agents)** — runs once all work is done, when the run produced any CONFIRMED finding at MEDIUM+ (per synthesis grid or adversarial verdicts); if none exists, skip — nothing to harvest. Follow the Memory System's Knowledge Harvesting procedure. **Delivery gate:** before reporting T3 completion, confirm the harvest ran (including the `knowledge.md` commit/push when the file is tracked) and `tmp/knowledge-harvest-report.md` exists when the trigger fired.
 
-The fix loop follows the convergence rule (see Convergence under Agent Delegation). Never batch multiple findings into one fix agent unless they share the same file/flow — then split by file.
+The fix loop follows the convergence rule (see Convergence under Delegation Rules). Never batch multiple findings into one fix agent unless they share the same file/flow — then split by file.
 
 Naming: `s1-review-<id>`, `s1-adv-<id>`, `s1-fix-<id>`, `s1-rereview-<id>`, `s1-postadv-<id>` (report paths must be unique per agent run).
 
@@ -317,7 +302,7 @@ Two-tier: **Knowledge** (`knowledge.md`) permanent, **Session** (`session.md`) t
 
 **Tags:** Cross-cutting concerns (e.g., `--tags redis,production,auth`). **Skip:** Trivial, easily grep-able, duplicates.
 
-**Knowledge Harvesting (after finishing anything serious — multi-step task, findings/review task, non-trivial research, significant change; trivial work skips it; runs only after the Completion Sanity Check passes — see Agent Delegation):** the main model does it itself, in-session, no agents:
+**Knowledge Harvesting (after finishing anything serious — multi-step task, findings/review task, non-trivial research, significant change; trivial work skips it; runs only after the Completion Sanity Check passes — see Delegation Rules):** the main model does it itself, in-session, no agents:
 1. **Search first** — for each candidate learning: `memory.sh search <topic>`; skip what already exists
 2. **Check old knowledge on the matter** — for every existing entry the task touched: outdated/incorrect → `delete` (reasons go in the report line below); partially right → replace with the better version; still correct → leave untouched. Conservative: prefer silence over noise; never delete without clear evidence
 3. **Add new learnings** — categorized (see table above), tagged
@@ -373,7 +358,7 @@ Multiple CLI instances work without conflicts. Resolution: `-S` flag > `MEMORY_S
 - **Tech queries: add `--tech`** for software dev, DevOps, IT, startups (Hacker News + Stack Overflow + Dev.to + GitHub)
 - **Empty results & timeouts are not tool failures** — a non-zero exit with a "No results: …" message on stderr means the query legitimately produced nothing usable (quality filters dropped every page, or all fetches failed) — retry with a different query angle. Each run is self-bounded by a 300s wall-clock timeout (env-overridable via `WEB_RESEARCH_TIMEOUT_SECONDS`); on timeout it exits non-zero with a "wall-clock timeout" message. **Note:** always use forward slashes (`/`) in paths for agent tool runs, even on Windows; dependencies are handled automatically via uv.
 
-**Deep research:** for large multi-query research tasks, delegate to the matching research agent — see **Research tasks** under Agent Delegation for the rule and the agent list.
+**Deep research:** for large multi-query research tasks, delegate to the matching research agent — see **Research tasks** under Delegation Rules for the rule and the agent list.
 
 ### Research Confidence — calibration, not labels
 
@@ -595,7 +580,7 @@ Follow this table for output budgets and concurrency; the quality rules' reading
 
 ## Delivery
 
-- Before declaring the task finished, the **Completion Sanity Check** must have passed (see Agent Delegation) — no completion claim and no knowledge harvest until it does
+- Before declaring the task finished, the **Completion Sanity Check** must have passed (see Delegation Rules) — no completion claim and no knowledge harvest until it does
 - Write final results to the user in the session — summaries, reports, files changed, severity-labeled findings
 - Clean up temporary task files: `rm -f tmp/*-task-prompt.txt tmp/*-task.txt`
   (keep reports, logs, memory; NEVER delete tmp/uv/ — it's the locally
