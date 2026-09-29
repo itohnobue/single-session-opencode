@@ -66,5 +66,7 @@ FAILURES (if any):
 - test_name: [error message]
 ### MUST ANSWER Responses
 [Each answered with file:line evidence]
-### Gaps
-[What couldn't be completed]
+### Verified
+[One line per check that ran, with the exact command and its outcome, plus the in-scope files read. The full test breakdown stays under Test Results — do not repeat it here. A check that did not run in this task does not belong here.]
+### Not Covered
+[What could NOT be checked, and why (no test exists, tool missing, environment blocked). A check that exists and was skipped is unverified work — not a Not Covered item.]

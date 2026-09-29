@@ -71,5 +71,7 @@ Reachability/Trigger = one line: the production path that reaches the defect, or
 [Per FIXABLE finding: exact root cause + a MINIMAL surgical fix design (5-15 lines); verdict FIXABLE / EXCLUDE with justification.]
 ### MUST ANSWER Responses
 [Each answered with file:line evidence. Positive confirmations go HERE, not in Findings]
-### Gaps
-[What couldn't be completed]
+### Verified
+[One line per check that ran, with the exact command and its outcome, plus the files read. A claim is verified only if you checked it in this task; a narrower substitute check is reported as what it is, with the exact command.]
+### Not Covered
+[What could NOT be checked, and why (no test/tool exists, environment blocked). A check that exists and was skipped is unverified work — not a Not Covered item.]

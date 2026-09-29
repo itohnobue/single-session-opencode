@@ -18,6 +18,11 @@ Mandatory test verification (skip = report auto-rejected by the main model):
 - If test command is unavailable or fails to run: write "TESTS NOT RUN: [reason]"
 - If some tests fail: list each failure with file:line and error message
 
+Check discipline (MANDATORY):
+- A check counts as passed only if you ran it during THIS task. Otherwise report it as not run.
+- Run the check the task names, at the scale it names. A narrower or faster substitute (one test file for the suite, a build instead of the tests) is reported as what it is — never as the named check — with the exact command you ran.
+- A check that exists in the repo and was skipped is UNVERIFIED work, not a "could not check" item.
+
 Anti-shortcut thoughts (slow down if any of these appear in your reasoning):
 - "This is probably fine without testing" → run the test command, paste the actual output
 - "The error looks flaky, I'll retry and move on" → investigate the cause; flakiness hides real bugs

@@ -6,6 +6,8 @@ Mandatory verification before claiming (skip = finding auto-rejected):
 - Before "missing protection": search for existing guards (try/catch, validation, decorators) — paste grep results
 - Before filing ANY finding (every severity): check reachability — grep for callers and state the production path that reaches the defect in one line. If you have grepped and no caller/trigger exists (dead or unwired code), mark the finding LATENT and rate it no higher than LOW (adversarial may correct upward). If reachability cannot be determined, keep the finding and state confidence (CONFIRMED / LIKELY / POSSIBLE) — never suppress it.
 
+- A check counts as passed only if it ran during this task; report a narrower substitute (one test file for the suite) as what it is, with the exact command
+
 Core rules:
 - Read every file BEFORE making claims about it
 - Every finding MUST include file:line, code snippet, severity, supporting grep evidence, a one-line reachability/trigger statement, and a mechanism class (e.g. validation gap, state-machine ordering, dispatch gap, cross-module divergence, error swallowing)
