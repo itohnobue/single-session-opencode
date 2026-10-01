@@ -218,6 +218,19 @@ function Main {
     }
     Write-Info "Created tmp\ for agent working files"
 
+    # -- Step 6: .gitignore - CodeGraph index --
+    Write-Step "Ensuring .codegraph/ is gitignored"
+    $gi = Join-Path $Target ".gitignore"
+    if ((Test-Path $gi) -and ((Get-Content $gi -ErrorAction SilentlyContinue) -contains ".codegraph/")) {
+        Write-Info ".gitignore already ignores .codegraph/"
+    } elseif (Test-Path $gi) {
+        Add-Content -Path $gi -Value "`n# CodeGraph local code index (generated per machine)`n.codegraph/"
+        Write-Info "Added .codegraph/ to .gitignore"
+    } else {
+        Set-Content -Path $gi -Value "# CodeGraph local code index (generated per machine)`n.codegraph/"
+        Write-Info "Created .gitignore with .codegraph/"
+    }
+
     # -- Done --
     $agentCount = (Get-ChildItem (Join-Path $opencodeDir "agents\*.md") | Where-Object { $_.Name -ne "INDEX.md" }).Count
 

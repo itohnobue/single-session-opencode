@@ -188,6 +188,22 @@ main() {
   mkdir -p "$target/tmp"
   info "Created tmp/ for agent working files"
 
+  # ── Step 6: .gitignore — CodeGraph index ──
+  step "Ensuring .codegraph/ is gitignored"
+  gi="$target/.gitignore"
+  if [ -s "$gi" ]; then
+    if tr -d '\r' < "$gi" | grep -qxF '.codegraph/'; then
+      info ".gitignore already ignores .codegraph/"
+    else
+      [ -n "$(tail -c 1 "$gi")" ] && printf '\n' >> "$gi"
+      printf '\n# CodeGraph local code index (generated per machine)\n.codegraph/\n' >> "$gi"
+      info "Added .codegraph/ to .gitignore"
+    fi
+  else
+    printf '# CodeGraph local code index (generated per machine)\n.codegraph/\n' > "$gi"
+    info "Created .gitignore with .codegraph/"
+  fi
+
   # ── Done ──
   printf '\n'
   printf '%s╔══════════════════════════════════════╗%s\n' "$GREEN" "$RESET"

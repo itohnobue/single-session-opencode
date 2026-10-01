@@ -8,6 +8,8 @@ You can use the `tmp/` subfolder in the current project folder to save temporary
 
 `tmp/uv/` is reserved for the local uv installation (tool-use policy R3).
 
+`tmp/codegraph/` is reserved for the local CodeGraph installation (same rule — cleanup never touches it).
+
 ---
 
 ## Operating notes
@@ -518,6 +520,8 @@ R3. Python — always via uv; no global pip installs, no repo venvs
   - before a parallel agent fan-out, ensure uv is already installed
     (`tmp/uv/uv --version`); never let parallel subagents bootstrap it
     simultaneously — first-install races can corrupt the binary
+  - CodeGraph bootstraps repo-locally into tmp/codegraph/ on first use (same
+    rule: never let parallel subagents bootstrap it simultaneously)
   - cross-platform reads: binary or newline='', explicit ordering
   Use a script when ANY holds:
   (a) quoting exposure: spaces, quotes, $, backticks, globs, unicode,
@@ -563,6 +567,37 @@ Each tool/command declares two things: how much output enters context, and wheth
 | Web fetch / search | digest or path inline; full page/report → artifact file | **no** — sequential (rate limits) |
 
 Follow this table for output budgets and concurrency; the quality rules' reading-strategy and verification rules stand.
+
+---
+
+## CodeGraph — code index (default structural tool)
+
+This project uses a CodeGraph index (`.codegraph/`, gitignored; built per machine, never committed). The index is built automatically on first use and synced before every query — always current, no manual step, no daemon, no MCP.
+
+**ORDER OF OPERATIONS (mandatory sequence for structural discovery — tool selection, not a pipeline step):**
+1. For ANY structural question (definition of X, who calls X, what X calls, blast radius of a change, which tests are affected, "how does X flow") → call the wrapper FIRST, before grep/glob/read. The index answers in one call with verified file:line results.
+2. Verify by READING the returned file:line spans. Do NOT re-run grep/rg to "double-check" counts.
+3. grep/glob/read only for: exact literals (error messages, env vars, config keys); index absent (fresh clone: run `./.opencode/tools/codegraph.sh init`); index exhausted ("where the graph stops"); final full-file reads after the spans.
+
+    ./.opencode/tools/codegraph.sh query "X"           # find symbols
+    ./.opencode/tools/codegraph.sh callers "X"         # who calls X
+    ./.opencode/tools/codegraph.sh callees "X"         # what X calls
+    ./.opencode/tools/codegraph.sh impact "X"          # blast radius
+    ./.opencode/tools/codegraph.sh explore "how X works"   # source + call path in one call
+    ./.opencode/tools/codegraph.sh affected --stdin    # tests touched by a diff
+
+Fallbacks (still fine, do NOT invent index-only results): exact literals (error messages, env vars, config keys) → grep; after index absence (`./.opencode/tools/codegraph.sh init`) or an incomplete answer ("where the graph stops") → grep/read; reading full files after locating symbols → read. The wrapper installs its binary locally on first use (like uv — no system install, no PATH edits) and auto-syncs the index before every query; no manual step, no daemon. The index is local to this machine; each machine builds its own. Wrappers: `.opencode/tools/codegraph.sh` (macOS/Linux/MSYS) / `.opencode/tools/codegraph.bat` (Windows).
+
+COUNT SEMANTICS (do not misread as staleness): `callers`/`callees`/`impact` return **functions/symbols, deduped** — an index answer of "20 callers" while grep shows "233 hits" is *function vs occurrence* counting, NOT an incomplete index (the hits are inside those functions). The index auto-syncs before each call and is never stale. `explore`'s blast-radius counts are references — again not occurrences. Grep counts raw occurrences only when an exact per-site count is demanded.
+
+BOUNDARY + TEST-COVERAGE questions follow the same rule: the graph spans language/module boundaries in ONE graph — query binding/interop symbols before grepping for `PyMethodDef`/`DllImport`/`extern "C"`/`@objc`/bridge-header chains; "which tests cover X" = `callers X` lists the test functions themselves — check that before grepping test directories.
+
+TRUST & NOISE (verify by reading, NOT re-grepping): the index's lists on an exact symbol are resolved answers — do NOT re-run grep/rg to "double-check" counts. Verification = read the returned file:line spans. Expected noise — ignore, do not investigate: a `file <x>` entry = a file-level reference, NOT a real caller; `explore`'s blast radius includes transitively-related symbols — on a NARROW 1-2 symbol question use `callers`/`callees`/`impact` on the exact symbols instead of explore's overview.
+
+KEEP THE NO-TESTS SIGNAL: a "no tests within N hops" remark in `explore` output is NOT noise — it is the honest answer that no tests are reachable within that radius; report it as-is, do NOT grep test directories to disprove it.
+RARE WRONG EDGE: if a returned edge looks mis-attributed (same-name symbol from another file), read the span and fix your mental model — never distrust the index over one edge.
+
+TOOL-CHOICE LADDER (one question, one tool): "how does X flow / chain across modules" → **`explore` FIRST** (one call returns the ordered hop chain + blast radius); hand-assembling chains with repeated `query`/`callers` calls is the inefficient pattern. "Who calls / what does X call / what breaks" → `callers`/`callees`/`impact` (one per symbol). "Where is X / what files" → `query`. THEN read the returned spans. If the graph's answer is thin in one hop, read that hop — do not re-run the whole discovery.
 
 ## Error Handling
 
