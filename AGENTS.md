@@ -287,6 +287,7 @@ Two-tier: **Knowledge** (`knowledge.md`) permanent, **Session** (`session.md`) t
 
 ```bash
 ./.opencode/tools/memory.sh add <category> "<content>" [--tags a,b,c]   # memory.bat on Windows
+./.opencode/tools/memory.sh update <id> "<content>" [--tags a,b,c] [--category c]
 ```
 
 | Category | Save When |
@@ -306,14 +307,14 @@ Two-tier: **Knowledge** (`knowledge.md`) permanent, **Session** (`session.md`) t
 
 **Knowledge Harvesting (after finishing anything serious — multi-step task, findings/review task, non-trivial research, significant change; trivial work skips it; runs only after the Completion Sanity Check passes — see Delegation Rules):** the main model does it itself, in-session, no agents:
 1. **Search first** — for each candidate learning: `memory.sh search <topic>`; skip what already exists
-2. **Check old knowledge on the matter** — for every existing entry the task touched: outdated/incorrect → `delete` (reasons go in the report line below); partially right → replace with the better version; still correct → leave untouched. Conservative: prefer silence over noise; never delete without clear evidence
+2. **Check old knowledge on the matter** — for every existing entry the task touched: outdated/incorrect → `delete` (reasons go in the report line below); partially right → `update <id>` in place (content/tags/category), never delete+re-add; still correct → leave untouched. Conservative: prefer silence over noise; never delete without clear evidence
 3. **Add new learnings** — categorized (see table above), tagged
 4. **Commit + push knowledge.md (tracked repos only)** — once all memory writes are done: if the file is tracked by git (`git ls-files --error-unmatch knowledge.md` succeeds) and changed (`git status --porcelain knowledge.md`), commit and push it alone — `git commit -m "memory: knowledge update" -- knowledge.md && git push` (the pathspec commit keeps other staged/dirty changes out). Untracked/ignored/non-git → skip silently; a failed push (no remote/upstream) is reported, never forced
 5. **Report** — "Memories saved: [list]; updated: [list]; retired: [list] (reasons)" or "Memories saved: None"; append the VCS outcome — e.g. "knowledge.md committed+pushed" / "VCS: skipped (untracked)" / "VCS: push failed (<reason>)"
 
-**Subagent read access (READ-ONLY):** subagents are read-only consumers of the memory system — the coordination templates tell them to run 1-2 `memory.sh search` / `list` (or read `knowledge.md`) before starting work as a cheap prior-art check, and to report the result in one line. They NEVER `add` / `delete` / `session.*` — all writes stay the main model's exclusive job (adds, deletes, sessions, harvesting).
+**Subagent read access (READ-ONLY):** subagents are read-only consumers of the memory system — the coordination templates tell them to run 1-2 `memory.sh search` / `list` (or read `knowledge.md`) before starting work as a cheap prior-art check, and to report the result in one line. They NEVER `add` / `update` / `delete` / `session.*` — all writes stay the main model's exclusive job (adds, updates, deletes, sessions, harvesting).
 
-**Other:** `search "<query>"`, `list [--category CAT]`, `delete <id>`, `stats`
+**Other:** `search "<query>"`, `list [--category CAT]`, `delete <id>`, `update <id>`, `stats`
 
 ### Session
 

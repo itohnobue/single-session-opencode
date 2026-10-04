@@ -23,10 +23,12 @@ Features:
 
 Usage:
     memory.sh add <category> <content> [--tags tag1,tag2]
+    memory.sh update <id> [<content>] [--tags tag1,tag2] [--category cat]
     memory.sh search <query> [--category cat] [--limit n]
     memory.sh context <topic>
     memory.sh list [--category cat]
     memory.sh delete <id>
+    memory.sh check
     memory.sh stats
     memory.sh session add <category> <content> [--status status] [-S session]
     memory.sh session list [--status status] [-S session]
@@ -99,6 +101,10 @@ STOP_WORDS = frozenset([
     "a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for",
     "of", "with", "by", "is", "it", "this", "that", "be", "are", "was",
 ])
+
+# Store-health check (`check`): candidate-pairing thresholds
+SIMILARITY_THRESHOLD = 0.55
+MIN_SIMILARITY_TOKENS = 8
 
 
 # =============================================================================
@@ -606,6 +612,43 @@ def cmd_delete(memory_id: str) -> dict[str, Any]:
     return {"status": "error", "message": f"Not found: {memory_id}"}
 
 
+def cmd_update(
+    memory_id: str,
+    content: str | None = None,
+    tags: list[str] | None = None,
+    category: str | None = None,
+) -> dict[str, Any]:
+    """Update a memory's content, tags, or category in place."""
+    if content is None and tags is None and category is None:
+        return {"status": "error", "message": "Nothing to update"}
+
+    if category is not None and category.lower() not in CATEGORIES:
+        return {
+            "status": "error",
+            "message": f"Invalid category: {category}. Valid: {', '.join(CATEGORIES)}",
+        }
+
+    memories = parse_knowledge_file()
+    for memory in memories:
+        if memory.id != memory_id:
+            continue
+        if content is not None:
+            memory.content = content
+        if tags is not None:
+            memory.tags = tags
+        if category is not None:
+            memory.category = category.lower()
+        memory.changed_at = datetime.now().isoformat()
+        write_knowledge_file(memories)
+        return {
+            "status": "success",
+            "message": f"Updated: {memory_id}",
+            "memory": memory.to_dict(),
+        }
+
+    return {"status": "error", "message": f"Not found: {memory_id}"}
+
+
 def cmd_stats() -> dict[str, Any]:
     """Show statistics."""
     memories = parse_knowledge_file()
@@ -617,6 +660,80 @@ def cmd_stats() -> dict[str, Any]:
     return {
         "total_memories": len(memories),
         "by_category": dict(sorted(by_category.items(), key=lambda x: x[1], reverse=True)),
+    }
+
+
+def _structural_issues(memories: list[Memory]) -> list[dict[str, str]]:
+    """Deterministic store defects — each is an unambiguous problem."""
+    issues: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for memory in memories:
+        if memory.id in seen:
+            issues.append({"id": memory.id, "issue": "duplicate id"})
+        seen.add(memory.id)
+        if memory.category not in CATEGORIES:
+            issues.append({"id": memory.id, "issue": f"invalid category '{memory.category}'"})
+        if not memory.content.strip():
+            issues.append({"id": memory.id, "issue": "empty content"})
+        if not memory.changed_at:
+            issues.append({"id": memory.id, "issue": "missing Changed"})
+    return issues
+
+
+def _similar_pairs(memories: list[Memory]) -> list[dict[str, Any]]:
+    """Heuristic duplicate/supersession candidates via token-set similarity.
+
+    score = max(Jaccard, containment); containment catches a shorter entry
+    largely subsumed by a longer one (the classic superseded-entry case).
+    Advisory only — nothing is merged or deleted.
+    """
+    token_sets: dict[str, set[str]] = {}
+    by_id: dict[str, Memory] = {}
+    for memory in memories:
+        tokens = set(_tokenize_for_bm25(_memory_doc_text(memory)))
+        if len(tokens) >= MIN_SIMILARITY_TOKENS:
+            token_sets[memory.id] = tokens
+            by_id[memory.id] = memory
+
+    ids = list(token_sets)
+    pairs: list[dict[str, Any]] = []
+    for i, a in enumerate(ids):
+        ta = token_sets[a]
+        for b in ids[i + 1:]:
+            tb = token_sets[b]
+            shared = ta & tb
+            if not shared:
+                continue
+            jaccard = len(shared) / len(ta | tb)
+            containment = len(shared) / min(len(ta), len(tb))
+            score = max(jaccard, containment)
+            if score < SIMILARITY_THRESHOLD:
+                continue
+            pairs.append({
+                "a": a,
+                "b": b,
+                "score": round(score, 2),
+                "jaccard": round(jaccard, 2),
+                "containment": round(containment, 2),
+                "shared_tags": sorted(set(by_id[a].tags) & set(by_id[b].tags)),
+            })
+
+    pairs.sort(key=lambda p: p["score"], reverse=True)
+    return pairs
+
+
+def cmd_check(limit: int = 10) -> dict[str, Any]:
+    """Report structural defects and likely duplicate/superseded entries."""
+    memories = parse_knowledge_file()
+    structural = _structural_issues(memories)
+    similar = _similar_pairs(memories)
+
+    return {
+        "total": len(memories),
+        "structural_count": len(structural),
+        "structural": structural,
+        "similar_count": len(similar),
+        "similar": similar[:limit],
     }
 
 
@@ -992,12 +1109,35 @@ def format_output(data: dict[str, Any], fmt: str = "text") -> str:
     # Single memory/entry
     if "memory" in data:
         m = data["memory"]
-        return f"Added [{m['category']}] {m['id']}\n{m['content']}"
+        return f"[{m['category']}] {m['id']}\n{m['content']}"
 
     if "entry" in data:
         e = data["entry"]
         status = f" ({e['status']})" if e.get("status") else ""
         return f"[{e['category']}] {e['id']}{status}\n{e['content']}"
+
+    # Store-health check report
+    if "structural" in data:
+        lines = [f"Memory check: {data['total']} entries\n"]
+        lines.append(f"Structural issues: {data['structural_count']}")
+        if data["structural"]:
+            for item in data["structural"]:
+                lines.append(f"  - [{item['id']}] {item['issue']}")
+        else:
+            lines.append("  none")
+        shown = data["similar"]
+        shown_note = f" (showing {len(shown)})" if data["similar_count"] > len(shown) else ""
+        lines.append("")
+        lines.append(f"Similarity candidates: {data['similar_count']}{shown_note}")
+        if shown:
+            for pair in shown:
+                tags = ", ".join(pair["shared_tags"]) if pair["shared_tags"] else "-"
+                lines.append(
+                    f"  - {pair['score']} [{pair['a']}] <-> [{pair['b']}]  (shared tags: {tags})"
+                )
+        else:
+            lines.append("  none")
+        return "\n".join(lines)
 
     # Message
     if "message" in data:
@@ -1017,10 +1157,12 @@ def main() -> None:
         epilog=f"""
 Commands:
   add <category> <content>    Add a memory
+  update <id> [content]       Update a memory in place
   search <query>              Search memories
   context <topic>             Get context for topic
   list                        List memories
   delete <id>                 Delete a memory
+  check                       Report store defects and duplicate candidates
   stats                       Show statistics
 
 Session Commands:
@@ -1050,7 +1192,7 @@ Session Statuses: {', '.join(SESSION_STATUSES)}
     )
 
     parser.add_argument("command", nargs="?",
-                        choices=["add", "search", "context", "list", "delete", "stats", "session"],
+                        choices=["add", "search", "context", "list", "delete", "update", "check", "stats", "session"],
                         help="Command to execute")
     parser.add_argument("args", nargs="*", help="Command arguments")
     parser.add_argument("--tags", "-t", help="Comma-separated tags")
@@ -1079,6 +1221,23 @@ Session Statuses: {', '.join(SESSION_STATUSES)}
             tags = [t.strip() for t in args.tags.split(",") if t.strip()] if args.tags else []
             result = cmd_add(args.args[0], " ".join(args.args[1:]), tags)
 
+        elif args.command == "update":
+            if not args.args:
+                print("Error: update requires <id>", file=sys.stderr)
+                sys.exit(1)
+            content = " ".join(args.args[1:]) if len(args.args) > 1 else None
+            tags = (
+                [t.strip() for t in args.tags.split(",") if t.strip()]
+                if args.tags is not None
+                else None
+            )
+            result = cmd_update(
+                args.args[0],
+                content=content,
+                tags=tags,
+                category=args.category,
+            )
+
         elif args.command == "search":
             if not args.args:
                 print("Error: search requires <query>", file=sys.stderr)
@@ -1093,6 +1252,9 @@ Session Statuses: {', '.join(SESSION_STATUSES)}
 
         elif args.command == "list":
             result = cmd_list(category=args.category, limit=args.limit)
+
+        elif args.command == "check":
+            result = cmd_check(limit=args.limit)
 
         elif args.command == "delete":
             if not args.args:
@@ -1189,7 +1351,7 @@ Session Statuses: {', '.join(SESSION_STATUSES)}
         elif args.output == "json":
             print(format_output(result, "json"))
 
-        if is_error:
+        if is_error or (args.command == "check" and result.get("structural_count")):
             sys.exit(1)
 
     except Exception as e:
