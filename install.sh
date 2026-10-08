@@ -45,7 +45,7 @@ What it does:
   1. Checks that OpenCode CLI is installed and in PATH
   2. Copies .opencode/ directory (agents, tools, templates, skills, plugin) to your project
   3. Creates AGENTS.md with single-session workflow instructions
-  4. Creates opencode.json with default allowance (skipped if one exists)
+  4. Creates opencode.json: allow all, disable built-in websearch/webfetch (skipped if one exists)
   5. Creates tmp/ directory for agent working files
 
 If .opencode/ already exists, suite files are synchronized to the current
@@ -180,7 +180,7 @@ main() {
     warn "opencode.json already exists in target — keeping it (may hold machine-local settings)"
   else
     cp "$SCRIPT_DIR/opencode.json" "$target/opencode.json"
-    info "Created opencode.json with default allowance (permission allow, no model pin)"
+    info "Created opencode.json (allow all; websearch/webfetch disabled; no model pin)"
   fi
 
   # ── Step 5: tmp/ directory ──
@@ -219,7 +219,7 @@ main() {
   printf '    .opencode/skills/     Workflow skills\n'
   printf '    .opencode/plugin/     Local plugin (dual V1/V2 entrypoint)\n'
   printf '    AGENTS.md             Single-session workflow instructions\n'
-  printf '    opencode.json         Default allowance (permission allow, no model pin)\n'
+  printf '    opencode.json         Allow all; websearch/webfetch disabled; no model pin\n'
   printf '    tmp/                  Agent working directory\n'
   printf '\n'
   printf '  %sUsage:%s\n' "$BOLD" "$RESET"

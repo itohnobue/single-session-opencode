@@ -15,12 +15,12 @@ The installer copies `.opencode/` (agents, tools, templates, skills, plugin), `A
 
 ## Default allowance
 
-The shipped `opencode.json` sets only the V1 shorthand `"permission": "allow"` (V2 normalizes it) — **no model pin**: the model and provider come from your machine's global OpenCode config (`~/.config/opencode/opencode.json`). Edit the project `opencode.json` for a per-machine override. Reasoning effort is configured in the global config (agents do not pin their own).
+The shipped `opencode.json` allows all other operations (V1 shorthand `"permission": "allow"`, which V2 normalizes) and hard-disables the built-in web search/fetch tools on both versions — V1 via `"tools": { "websearch": false, "webfetch": false }`, V2 via `"websearch": false` plus a `permissions` deny; all web research goes through `web_search.sh`. It pins **no model**: the model and provider come from your machine's global OpenCode config (`~/.config/opencode/opencode.json`). Edit the project `opencode.json` for a per-machine override. Reasoning effort is configured in the global config (agents do not pin their own).
 
 ## How it works
 
 - **One session, one worker** — the model reads, writes, runs, and verifies, all in dialog with you. You can interject or redirect at any moment.
-- **Search-first** — when the answer depends on external facts (versions, APIs, docs), the model runs `web_search.sh` instead of guessing. Memory-only answers are the exception.
+- **Search-first** — when the answer depends on external facts (versions, APIs, docs), the model runs `web_search.sh` instead of guessing; the built-in `websearch`/`webfetch` tools are disabled. Memory-only answers are the exception.
 - **Tiered delegation** — big/heavy/context-hungry work goes to subagents in three tiers. Delegation is judgment, not a pipeline:
   - **T1 — plain executor** — task context is the briefing, no research. Use only when the task file carries every fact.
   - **T2 — researched executor** — `prepare-agent` ALWAYS researches the task's technologies into a full research report + compact digest that the executor carries as its briefing (the spawn is mandatory).
