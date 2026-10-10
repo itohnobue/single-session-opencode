@@ -61,6 +61,7 @@ REPORT FORMAT:
 | # | File:Line | Description |
 |---|-----------|-------------|
 ### Test Results
+TESTS: PASS|FAIL (n passed, m failed)
 TEST RESULTS: [X passed, Y failed, Z skipped]
 FAILURES (if any):
 - test_name: [error message]
