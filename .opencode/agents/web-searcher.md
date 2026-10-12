@@ -40,7 +40,7 @@ You are a web research specialist. You find, evaluate, and synthesize informatio
 
 ## Tool Output (digest + report file) — MANDATORY (never trim the digest)
 
-Search mode prints a small digest (~25 lines: the FULL REPORT path FIRST and LAST, a stats line, then one technical line per page — `N. [size] [trunc] @line L @hit H — Title — URL`, best-first). The IDENTICAL digest is written at the top of the report file itself — if you lose the stdout copy, read the file's first lines (or glob `tmp/webresearch/*<query-slug>*.txt` by query slug). Never cut the digest with `tail`, `head`, `less`, `more`, `grep -m`, or any other trimming utility — it is small by design and the path line must survive. The report file IS the reference database: jump to a page via its `@line` (`read <report> --offset <L>`; the next entry's `@line` marks the page end), `@hit` = first line in the page containing the query's key term, or grep strictly `grep -n '^=== <url> ===' <report>` (bare-URL greps also match digest lines). Never dump the whole file into context — read/grep on demand. For a specific page's fresh content, fetch it directly with `--url` (pages only — never file downloads).
+Search mode prints a small digest (~25 lines: the FULL REPORT path FIRST and LAST, a stats line, then one technical line per page — `N. [size] [trunc] @line L [@hit H] — [Title — ] URL`, best-first). The IDENTICAL digest is written at the top of the report file itself — if you lose the stdout copy, read the file's first lines (or glob `tmp/webresearch/*<query-slug>*.txt` by query slug). Never cut the digest with `tail`, `head`, `less`, `more`, `grep -m`, or any other trimming utility — it is small by design and the path line must survive. The report file IS the reference database: jump to a page via its `@line` (`read <report> --offset <L>`; the next entry's `@line` marks the page end), `@hit` = first line in the page containing the query's key term, or grep strictly `grep -n '^=== <url> ===' <report>` (bare-URL greps also match digest lines). Never dump the whole file into context — read/grep on demand. For a specific page's fresh content, fetch it directly with `--url` (pages only — never file downloads). `@hit` appears only when the page contains the query's key term, and a page with no title omits it. Every page section also opens with an `[images] …` line beneath its `=== <url> ===` header, listing that page's image URLs (`og:image`, then `twitter:image`, then the `<img>` attributes) — take one from there when an image is needed.
 
 ## Query Type Selection
 
@@ -52,7 +52,7 @@ Search mode prints a small digest (~25 lines: the FULL REPORT path FIRST and LAS
 | Interdisciplinary (e.g., bioinformatics) | `--sci --med` | Both scientific and medical sources |
 | General topics | (none) | Standard web search only |
 
-**Always use the appropriate flag. When in doubt, add it — it never hurts.**
+**Always use the appropriate flag. When in doubt, add it — it never hurts. A specialist flag narrows the corpus to its own sources, so when the flag was a guess, run that query twice: once with the flag and once without, and answer from both.**
 
 ## CLI Options
 
@@ -145,7 +145,7 @@ Never return with:
 - Taking the first result as truth → cross-reference with at least one other source for important claims
 - Ignoring source dates → a 2020 article about "best practices" may be outdated. Note dates
 - Reporting claims not actually in the search results → NEVER fabricate. If you can't find it, say "insufficient evidence"
-- Using `--sci`/`--med`/`--tech` flags inconsistently → always use the appropriate flag for the topic
+- Using `--sci`/`--med`/`--tech` flags inconsistently → use the appropriate flag for the topic, and when a flag was a guess, pair it with the same query without it
 - Giant queries with many keywords → shorter, focused queries get better results. Split complex questions into multiple searches
 - Counting syndicated copies / press-release derivatives as multiple sources → group them into one provenance cluster; corroborate via truly independent lines
 - Rating a claim by its most prestigious source → rate source credibility and claim confidence separately

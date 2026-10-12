@@ -61,7 +61,7 @@ import time
 import types
 import urllib.parse
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from html import unescape
 from io import StringIO
 from pathlib import Path
@@ -486,6 +486,10 @@ class FetchResult:
     title: str = ""
     error: Optional[str] = None
     source: str = "scrapling"
+    # Candidate image URLs found on the page (og:image / twitter:image first,
+    # then <img> src/data-src/data-original/srcset). Printed as one `[images]`
+    # line under the page's `=== <url> ===` header in the full report.
+    images: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -1396,6 +1400,170 @@ def _extract_content(raw_html: str) -> Tuple[str, str]:
     return content, structured
 
 
+# Image candidates on a page: pure regex over the HTML (no HTML parser, no new
+# dependency). The Chrome/escalation path yields extracted text only, not HTML,
+# so its FetchResult carries no images (see module notes).
+_IMG_META_RE = re.compile(r"<meta\b[^>]*>", re.I)
+_IMG_TAG_RE = re.compile(r"<img\b[^>]*>", re.I)
+_IMG_ATTR_RE = re.compile(
+    r"""([a-zA-Z_:][-a-zA-Z0-9_:.]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))"""
+)
+# URL path/filename fragments that mark page chrome rather than content.
+_IMG_NOISE_TOKENS = (
+    "logo", "icon", "sprite", "pixel", "tracker", "spacer", "blank", "favicon",
+)
+_IMG_MAX_CANDIDATES = 12
+
+
+def _img_tag_attrs(tag: str) -> Dict[str, str]:
+    """Attribute dict for one raw HTML tag (lowercased keys)."""
+    attrs: Dict[str, str] = {}
+    for m in _IMG_ATTR_RE.finditer(tag):
+        val = m.group(2)
+        if val is None:
+            val = m.group(3)
+        if val is None:
+            val = m.group(4) or ""
+        attrs[m.group(1).lower()] = val
+    return attrs
+
+
+def _img_size_drop(attrs: Dict[str, str]) -> bool:
+    """True when explicit width/height attributes mark a sub-100px image."""
+    try:
+        w = int(float(attrs.get("width") or 0))
+        h = int(float(attrs.get("height") or 0))
+    except (TypeError, ValueError):
+        return False
+    return 0 < w < 100 and 0 < h < 100
+
+
+def _img_candidate_values(attrs: Dict[str, str]) -> List[str]:
+    """src / data-src / data-original (lazy) + the FIRST srcset URL."""
+    vals: List[str] = []
+    for key in ("src", "data-src", "data-original"):
+        v = (attrs.get(key) or "").strip()
+        if v:
+            vals.append(v)
+    srcset = attrs.get("srcset") or ""
+    if srcset:
+        first = srcset.split(",")[0].strip().split()
+        if first:
+            vals.append(first[0])
+    return vals
+
+
+def _is_noise_image_url(path: str) -> bool:
+    low = path.lower()
+    if low.endswith(".svg"):
+        return True
+    return any(tok in low for tok in _IMG_NOISE_TOKENS)
+
+
+def _dom_img_attrs(page) -> Optional[List[Dict[str, str]]]:
+    """Best-effort <img> attribute dicts from the scrapling DOM, or None.
+
+    Returns None when the page object exposes no CSS selector (the httpx
+    fallback path) or the DOM API does not behave — the caller then falls back
+    to the raw-HTML scan. Kept cheap: one selector pass, no second fetch.
+    """
+    try:
+        css = getattr(page, "css", None)
+        if css is None:
+            return None
+        els = css("img")
+        out: List[Dict[str, str]] = []
+        for el in els:
+            attrib = getattr(el, "attrib", None)
+            if attrib is None:
+                return None
+            out.append({str(k).lower(): v for k, v in dict(attrib).items()})
+        return out
+    except Exception:
+        return None
+
+
+def _extract_image_urls(
+    raw_html: str,
+    page_url: str,
+    dom_imgs: Optional[List[Dict[str, str]]] = None,
+) -> List[str]:
+    """Candidate image URLs on a page (pure; runs in the extract pool).
+
+    Order: og:image, then twitter:image, then every <img>'s src/data-src/
+    data-original and the FIRST srcset URL (covers lazy-loaded images). Every
+    URL is resolved against the page URL; `data:`/`blob:` URLs and obvious
+    chrome (logo/icon/sprite/pixel/tracker/spacer/blank/favicon, any `.svg`)
+    are dropped; results are deduped preserving order and capped at 12.
+    `dom_imgs`, when given and non-empty, is the rendered DOM's <img> attribute
+    dicts and takes precedence over the raw-HTML scan.
+    """
+    if not raw_html and not dom_imgs:
+        return []
+
+    metas: List[str] = []
+    if raw_html:
+        og: List[str] = []
+        tw: List[str] = []
+        for m in _IMG_META_RE.finditer(raw_html):
+            a = _img_tag_attrs(m.group(0))
+            key = (a.get("property") or a.get("name") or "").strip().lower()
+            content = (a.get("content") or "").strip()
+            if not content:
+                continue
+            if key in ("og:image", "og:image:url", "og:image:secure_url"):
+                og.append(content)
+            elif key in ("twitter:image", "twitter:image:src"):
+                tw.append(content)
+        metas = og + tw
+
+    img_vals: List[str] = []
+    if dom_imgs:
+        for a in dom_imgs:
+            if _img_size_drop(a):
+                continue
+            img_vals.extend(_img_candidate_values(a))
+    elif raw_html:
+        for m in _IMG_TAG_RE.finditer(raw_html):
+            a = _img_tag_attrs(m.group(0))
+            if _img_size_drop(a):
+                continue
+            img_vals.extend(_img_candidate_values(a))
+
+    out: List[str] = []
+    seen: Set[str] = set()
+    for raw_val in metas + img_vals:
+        v = (raw_val or "").strip()
+        if not v:
+            continue
+        low = v.lower()
+        if low.startswith("data:") or low.startswith("blob:"):
+            continue
+        try:
+            absu = urllib.parse.urljoin(page_url, v)
+        except ValueError:
+            continue
+        parts = urllib.parse.urlsplit(absu)
+        if parts.scheme not in ("http", "https"):
+            continue
+        if _is_noise_image_url(parts.path):
+            continue
+        if absu in seen:
+            continue
+        seen.add(absu)
+        out.append(absu)
+        if len(out) >= _IMG_MAX_CANDIDATES:
+            break
+    return out
+
+
+def _images_line(images: Optional[List[str]]) -> str:
+    """The `[images] …` report line for one page, or "" when there is none."""
+    if not images:
+        return ""
+    return "[images] " + " | ".join(images) + "\n"
+
+
 # Shared process pool for CPU-bound text extraction (avoids blocking event loop)
 _extract_pool: Optional[ProcessPoolExecutor] = None
 
@@ -1425,10 +1593,19 @@ RE_ARXIV_URL = re.compile(r'https?://arxiv\.org/(?:abs|pdf)/(\d+\.\d+)')
 RE_TWITTER_URL = re.compile(r'https?://(?:twitter\.com|x\.com)/([^/]+)/status/(\d+)')
 RE_SEMANTIC_SCHOLAR_URL = re.compile(r'https?://(?:www\.)?semanticscholar\.org/paper/(?:.+/)?([a-f0-9]{40})')
 
-def _fetch_wikipedia_api(lang: str, title: str, max_length: int) -> Optional[str]:
-    """Fetch clean text from Wikipedia API (no scraping needed)."""
+def _fetch_wikipedia_api(lang: str, title: str, max_length: int) -> Optional[Tuple[str, Optional[str]]]:
+    """Fetch clean text + lead image from the Wikipedia API (no scraping needed).
+
+    Returns (text, lead_image_url) or None. The lead image comes from the
+    `pageimages` prop (pithumbsize=800) and is placed first in the page's
+    `[images]` line.
+    """
     import urllib.request
-    api_url = f"https://{lang}.wikipedia.org/w/api.php?action=query&titles={urllib.parse.quote(title)}&prop=extracts&explaintext=true&format=json"
+    api_url = (
+        f"https://{lang}.wikipedia.org/w/api.php?action=query&titles="
+        f"{urllib.parse.quote(title)}&prop=extracts|pageimages"
+        f"&explaintext=true&pithumbsize=800&format=json"
+    )
     try:
         req = urllib.request.Request(api_url, headers={"User-Agent": "web-research-tool/1.0"})
         with urllib.request.urlopen(req, timeout=5) as resp:
@@ -1438,7 +1615,9 @@ def _fetch_wikipedia_api(lang: str, title: str, max_length: int) -> Optional[str
             text = page_data.get("extract", "")
             if text:
                 page_title = page_data.get("title", title)
-                return f"# {page_title}\n\n{text[:max_length]}"
+                thumb = page_data.get("thumbnail")
+                image = thumb.get("source") if isinstance(thumb, dict) else None
+                return f"# {page_title}\n\n{text[:max_length]}", image
     except Exception:
         pass
     return None
@@ -1793,13 +1972,16 @@ async def fetch_single_async(
     try:
         # API fast-path: use native APIs for sites that produce cleaner output than scraping
         api_content = None
+        wiki_image: Optional[str] = None
         loop = asyncio.get_running_loop()
         wiki_match = RE_WIKIPEDIA_URL.match(url)
         if wiki_match:
             lang, title = wiki_match.group(1), wiki_match.group(2)
-            api_content = await loop.run_in_executor(
+            wiki_api = await loop.run_in_executor(
                 None, _fetch_wikipedia_api, lang, title, max_content_length
             )
+            if wiki_api:
+                api_content, wiki_image = wiki_api
         gh_match = RE_GITHUB_REPO_URL.match(url) if not api_content else None
         if gh_match:
             owner, repo = gh_match.group(1), gh_match.group(2)
@@ -1844,6 +2026,8 @@ async def fetch_single_async(
         if api_content:
             elapsed = time.monotonic() - t0
             result = _create_fetch_result(url, api_content, min_content_length, max_content_length, query=query, apply_filters=apply_filters)
+            if wiki_image:
+                result.images = [wiki_image]
             if progress:
                 progress.url_result(url, result.success, elapsed, result.error or "")
             return result
@@ -1943,10 +2127,21 @@ async def fetch_single_async(
 
         # Extract text + JSON-LD in process pool (CPU-bound, don't block event loop)
         loop = asyncio.get_running_loop()
+        images: List[str] = []
         if apply_filters:
             content, structured = await loop.run_in_executor(
                 _get_extract_pool(), _extract_content, raw_html
             )
+            # Candidate image URLs on the page (prefer the rendered DOM's <img>
+            # attributes when the scrapling page exposes them; otherwise scan the
+            # raw HTML). Same pool, so the regex never blocks the event loop.
+            dom_imgs = _dom_img_attrs(page)
+            try:
+                images = await loop.run_in_executor(
+                    _get_extract_pool(), _extract_image_urls, raw_html, url, dom_imgs
+                )
+            except Exception:  # noqa: BLE001 - images are optional; never fail a page
+                images = []
             # Fallback: Scrapling's DOM parser when primary extraction is too short
             if len(content) < min_content_length:
                 scrapling_content = _extract_with_scrapling_fallback(page, min_content_length)
@@ -1971,6 +2166,7 @@ async def fetch_single_async(
             )
             if wb_content:
                 result = _create_fetch_result(url, wb_content, min_content_length, max_content_length, query=query, apply_filters=apply_filters)
+        result.images = images
         # Escalation ladder: retry-worthy failures (HTTP 403/429/5xx, CAPTCHA,
         # Timeout, Too short) get one retry with real Google Chrome (the same tier
         # as --url-chrome, provisioned on first use by the preflight above),
@@ -2599,6 +2795,7 @@ def _dedup_results(
             content=new_content,
             title=r.title,
             source=r.source,
+            images=r.images,
         ))
 
     # Log dedup effectiveness at debug level
@@ -2715,6 +2912,7 @@ def _dedup_cross_page_sentences(
         out.append(FetchResult(
             url=r.url, success=True, content=new_content,
             title=r.title, source=r.source,
+            images=r.images,
         ))
 
     # Log dedup effectiveness at debug level
@@ -3173,6 +3371,9 @@ def format_batch_raw(results: List[FetchResult]) -> str:
     for r in results:
         if r.success:
             buffer.write(f"=== {r.url} ===\n")
+            images_line = _images_line(r.images)
+            if images_line:
+                buffer.write(images_line)
             buffer.write(r.content)
             buffer.write("\n\n")
     return buffer.getvalue()
@@ -3280,7 +3481,7 @@ def _build_report_file(pages: List[Tuple[FetchResult, str, bool]]) -> Tuple[str,
     line = 1
     for r, text, _ in pages:
         start_lines.append(line)
-        segment = f"=== {r.url} ===\n" + text + "\n\n"
+        segment = f"=== {r.url} ===\n" + _images_line(r.images) + text + "\n\n"
         buffer.write(segment)
         # splitlines() counts consumed lines exactly (trailing-newline cases
         # and empty separator lines included) — @line/@hit depend on this.
@@ -3381,8 +3582,11 @@ def _build_digest(
     for i, (r, text, truncated) in enumerate(pages, 1):
         size = f"[{_human_chars(len(text))}{' trunc' if truncated else ''}]"
         base = start_lines[i - 1] + line_offset if start_lines else 0
+        # A `[images] …` line sits between the header and the page text, so a
+        # relative text hit shifts by one before it is made absolute.
+        img_offset = 1 if r.images else 0
         hit = _find_hit_line(text, terms) if terms else None
-        hit_part = f" @hit {base + hit}" if hit else ""
+        hit_part = f" @hit {base + img_offset + hit}" if hit else ""
         if r.title:
             lines.append(f"{i}. {size} @line {base}{hit_part} — {r.title} — {r.url}")
         else:
