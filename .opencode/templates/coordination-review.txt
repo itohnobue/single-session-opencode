@@ -5,7 +5,7 @@ TOOL POLICY (MANDATORY): read and follow the repo AGENTS.md section `## Tool-use
 Before claiming something is missing or broken — grep for existing guards, handlers, or implementations first.
 
 MEMORY USE (READ-ONLY):
-- Before starting, run 1-2 prior-art searches on the task's main topics:
+- Before starting, run prior-art searches on the task's main topics and read the hits, letting a relevant entry shape your approach rather than just annotate the report (as many searches as the task needs):
     ./.opencode/tools/memory.sh search "<topic>"  (memory.bat on Windows)
   (read verbs only: search / list; reading knowledge.md at the repo root is fine)
 - NEVER add/delete/update knowledge or run session subcommands — writing is the main model's job.
