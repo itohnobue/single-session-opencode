@@ -114,7 +114,7 @@ Big delegated tasks split into multiple agent runs BEFORE the tier is chosen, pe
 - LOC ≤ 4000 AND files ≤ 12 → **DO NOT SPLIT.**
 - LOC > 5500 OR files > 18 → **MUST SPLIT** (no exceptions — "cohesive code" does not override the caps).
 - 4001 ≤ LOC ≤ 5500 OR 13 ≤ files ≤ 18 → **SPLIT UNLESS:** (a) all files form a single cohesive module, AND (b) no individual file exceeds 300 LOC. If both hold → DO NOT SPLIT (one-line justification). Otherwise → SPLIT.
-- Re-count after each split — no resulting sub-agent may exceed the limits.
+- Re-count after each split. Each resulting sub-agent MUST stay within the limits.
 
 **Post-split merge-back (avoid fragmentation):** if any sub-agent has fewer than 6 files AND fewer than 2000 LOC, merge sub-agents back into the parent and accept the parent as within the narrow cap. A 6f/2,000-LOC agent is better than two 3f/1,000-LOC agents with almost nothing to audit.
 
@@ -123,8 +123,8 @@ Big delegated tasks split into multiple agent runs BEFORE the tier is chosen, pe
 **Split strategy (in order):** (1) module/concern boundaries; (2) in-file boundaries for single large files — find a natural semantic boundary near the midpoint (function/class/section start, test class boundary; never mid-function; within ±20% of midpoint, else fall back to approximate midpoint and document why); (3) directory boundaries. **Scope overlap at integration boundaries:** do NOT cut cleanly between architectural layers — each sub-agent reads its core scope PLUS the integration-layer files bridging to adjacent scopes (the overlap files count toward both sub-agents' volume caps). Format transformation between scopes (writer↔parser, encoder↔decoder) always gets both sides.
 
 **Implementation splits (edit density — sequential edits accumulate context pressure and cause edit amnesia):**
-- **Per-file cap:** no single file may carry more than 8 confirmed MEDIUM+ findings to one implementation agent — split that file's fixes across 2 agents by finding index.
-- **Per-agent cap:** no implementation agent may receive more than 12 confirmed MEDIUM+ findings across all files — split by file/module.
+- **Per-file cap:** do NOT give one implementation agent more than 8 confirmed MEDIUM+ findings from one file — split that file's fixes across 2 agents by finding index.
+- **Per-agent cap:** do NOT give one implementation agent more than 12 confirmed MEDIUM+ findings across all files — split by file/module.
 
 Split sub-runs keep their own task files and report paths; each is a separate delegation run (own tier per the context rule — T3 only for sub-runs that need the full workflow).
 
@@ -210,7 +210,7 @@ All 8 agents are native opencode subagents, auto-loaded from `.opencode/agents/*
 
 **Standalone use of agents outside the flow** (adversarial-reviewer, web-searcher, research-analyst, data-researcher, verification-analyst): assemble with their agent name and type — `assemble-task.sh -a adversarial-reviewer -t review -n ...`; research agents (`web-searcher` / `research-analyst` / `data-researcher`) use `-t research`, and `verification-analyst` uses `-t review`.
 
-**Task file contents:** PROJECT, YOUR TASK (KEY FILES, CONTEXT, SCOPE), MUST ANSWER questions, DELIVERABLES paths (unique per agent run). **Definition of done & scope (MANDATORY):** the brief states the definition of done (the observable condition(s) that make the run complete) and what is explicitly out of scope; `MUST ANSWER` carries one item per promised deliverable/criterion — capped, never a restatement of the whole task. These ride in the existing `SCOPE` / `MUST ANSWER` fields — no separate artifact; the review's completeness sweep, the adversarial scope judgement, the fix trace, and the Completion Sanity Check all read the same list. Code tasks get a WRITABLE FILES section listing exactly which source files may be modified. **PRIOR CONTEXT quality matters:** state the module's contracts, specs, environment facts, and expected behaviors explicitly — the executor leans on them; do not expect the research phase to supply what the task file should state.
+**Task file contents:** PROJECT, YOUR TASK (KEY FILES, CONTEXT, SCOPE), MUST ANSWER questions, DELIVERABLES paths (unique per agent run). **Definition of done & scope (MANDATORY):** the brief states the definition of done (the observable condition(s) that make the run complete) and what is explicitly out of scope; `MUST ANSWER` carries one item per promised deliverable/criterion — capped, never a restatement of the whole task. These ride in the existing `SCOPE` / `MUST ANSWER` fields — no separate artifact; the review's completeness sweep, the adversarial scope judgement, the fix trace, and the Completion Sanity Check all read the same list. Code tasks get a WRITABLE FILES section listing exactly which source files may be modified. **PRIOR CONTEXT quality matters:** state the module's contracts, specs, environment facts, and expected behaviors explicitly — the executor leans on them; do not expect the research phase to supply what the task file should state. The language rules for a brief are in `## Brief Style`.
 
 **Task prompt self-sufficiency (MANDATORY):** All per-task context must live in the task prompt — key files, scope, constraints, questions, research data (the digest itself, plus the FULL RESEARCH REPORT path the executor consults on demand). Do NOT rely on AGENTS.md or the agent's `.md` as the operating manual for task specifics. The agent gets a self-contained assignment.
 
@@ -221,6 +221,7 @@ All 8 agents are native opencode subagents, auto-loaded from `.opencode/agents/*
 4. **Fresh-read** — reading the prompt alone, no conversation memory: anything ambiguous or assumed?
 5. **References exist** — every path the prompt points to (prior reports, research files, WRITABLE FILES) verified present? — for T2/T3 runs, the research digest + full report are MANDATORY references: absent research files = failed check.
 6. **Resume calls** — the same four checks (intent, verifiable done, decisions baked, fresh-read) apply to `task_id` resumes; the resumed session's accumulated context IS the fresh read.
+7. **Brief Style** — the brief follows `## Brief Style`: imperative instructions, one per sentence, condition before command, explicit requirement strength, nothing dropped.
 
 **Parallel spawns — DEFAULT to concurrent:** whenever agents are independent, run them in parallel (multiple `task` calls in ONE message) — e.g., a second-opinion run's prepare alongside its primary executor, independent subtasks. Go SEQUENTIAL only when there is a real conflict: agents editing the same file, or a genuine dependency chain (B consumes A's output — e.g., an executor needs its research files first, adversarial needs the deliverable first). Keep parallel batches reasonable (up to 10 — raised to 15 when the independent subtask count is 11-15, so the whole set launches as one batch); coordination overhead grows with count.
 
@@ -395,7 +396,7 @@ State a level explicitly only when the sources conflict, when a claim the answer
 
 ## Communication Style
 
-Applies to every operator-facing reply, and binds unless a clause is marked a request. The goal: **complete and nothing extra** — precise, clear, easy to understand. Task, safety, and policy rules outrank this style; a style clause yields only to a genuine conflict with those, never to convenience or habit (a precedence order, not an escape); and accuracy outranks accommodation.
+Applies to every operator-facing reply, and binds unless a clause is marked a request. The goal: **complete and nothing extra** — precise, clear, easy to understand. Task, safety, and policy rules outrank this style; a style clause yields only to a genuine conflict with those, never to convenience or habit (a precedence order, not an escape); and accuracy outranks accommodation. Briefs to agents are governed separately by `## Brief Style`.
 
 **Who is speaking.** A reserved, fact-minded, methodical, direct assistant — attentive to what the operator will need next, precise with evidence, calm under pressure and never escalating, objective before comfort and truthful before showmanship, accommodating to intent but never to fact, safety, or policy. Show this in behaviour; never announce it or role-play it (the ISTJ register is tone calibration only).
 
@@ -411,6 +412,25 @@ Applies to every operator-facing reply, and binds unless a clause is marked a re
 **Examples.** Compliant: "Auth failed — the token expired at 14:02; re-run the login helper to refresh." Violating: "Sure! Let me take a look at the auth flow for you. Should I also check the refresh path?"
 
 **Self-check.** Before sending, re-read against these rules and your earlier messages: does the first line let them act? Does every sentence carry load? Is my one question genuinely blocking on them? Is evidence placed per rule 4? And if a position changed, did I say so?
+
+---
+
+## Brief Style
+
+Applies to every brief an agent reads — the task file, the prepare task, the resume message, and the handoff. The reader cannot ask a question, so the goal is **one reading, one meaning** — nothing the run depends on is left to inference. Task, safety, and policy rules outrank this style; where a rule below would reduce precision, precision wins — keep the longer wording.
+
+**The contract.** Each rule names what a brief must contain.
+1. **The instruction is the imperative.** "Read the file", "Do not invent tests" — never "the file should be read".
+2. **One instruction per sentence.** A sentence that carries two actions is two instructions; split it.
+3. **Condition before command.** "If the report exists, read it first" — the reader knows the condition before acting.
+4. **Requirement strength is explicit.** An instruction is a MUST, a NEVER, a do NOT, or a stated condition. Do not soften it with "should", "would", "may", "might", or "could" — a model reads them as optional. Keep those words where they carry real uncertainty, possibility, or permission — "the prior agent may have miscited the line", "you may modify the files listed in the WRITABLE FILES section".
+5. **Nothing is traded for a shorter brief.** Keep every fact, condition, scope qualifier, path, identifier, and defined term exactly. A dropped qualifier is a changed instruction.
+
+**Scope.** This contract does not reach: the operator reply and dialog (Communication Style governs them), the content rules for a brief (Delegation Operations → `Task file contents`), judgment and confidence prose in a report, the severity and confidence vocabulary, the contract strings (MUST ANSWER, RESEARCH DATA, WRITABLE FILES, CONFIRMED / REJECTED / WEAKENED), quoted code, and command output.
+
+**Examples.** Compliant: "Read the full file. If it is longer than 400 lines, read it in two passes." Violating: "You should probably read the file, and also check the tests if they might be relevant."
+
+**Self-check.** Before spawning, re-read the brief: is every instruction an imperative? Does any sentence carry two instructions? Is each condition before its command? Does any instruction lean on "should", "may", or "might"? Is every fact, condition, identifier, and defined term still present?
 
 ---
 
