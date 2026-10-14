@@ -55,11 +55,15 @@ directory — that directory is for reading and editing source files only.
 
 REPORT FORMAT:
 ## [Subject]
+### Intent
+[Written BEFORE any edit: your understanding of the task and your intended approach, in your own words — assumptions, trade-offs, alternatives rejected. Write "N/A" for non-implementation runs.]
 ### Summary
 [2-3 sentences: scope covered, changes made, test results]
 ### Changes
 | # | File:Line | Description |
 |---|-----------|-------------|
+### Change Class
+[One line per applicable change-class obligation — condition change (BLOCK + LIVENESS directions), removal or neutering of documented-defensive code (why the past failure cannot recur), feature-runs-when change (the observable signal + the check that reads it). Write "NONE" when none applies. An applicable obligation left unanswered leaves the change unverified.]
 ### Test Results
 TESTS: PASS|FAIL (n passed, m failed)
 TEST RESULTS: [X passed, Y failed, Z skipped]
