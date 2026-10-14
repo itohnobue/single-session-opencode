@@ -7,6 +7,9 @@ Mandatory verification before claiming (skip = finding auto-rejected):
 - Before filing ANY finding (every severity): check reachability — grep for callers and state the production path that reaches the defect in one line. If you have grepped and no caller/trigger exists (dead or unwired code), mark the finding LATENT and rate it no higher than LOW (adversarial may correct upward). If reachability cannot be determined, keep the finding and state confidence (CONFIRMED / LIKELY / POSSIBLE) — never suppress it.
 
 - A check counts as passed only if it ran during this task; report a narrower substitute (one test file for the suite) as what it is, with the exact command
+- Assert on CONTENT, not shape or count — a count proves ABSENCE at scale, never correctness
+- Count with `grep -c` / `grep -o`, never through a truncating display: "I found N" is not "I saw N"
+- When re-checking a completeness inventory, use a DIFFERENT method than the one that built it — the same method reproduces the same blind spot
 
 Core rules:
 - Read every file BEFORE making claims about it
