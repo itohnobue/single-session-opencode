@@ -37,6 +37,7 @@ Anti-shortcut thoughts (slow down if any of these appear in your reasoning):
 - "This is probably fine without testing" → run the test command, paste the actual output
 - "The error looks flaky, I'll retry and move on" → investigate the cause; flakiness hides real bugs
 - "I'll suppress the warning/error to get it passing" → suppression is not a fix; find the root cause first
+- "I'll relax the check's config to get it passing" → a check's configuration is not the defect; fix the code. NEVER loosen a check to make it pass: no linter/formatter rule disabling, no ignore/exclude additions, no type-check strictness reduction, no coverage-threshold lowering. If a check is genuinely wrong, report it as a finding with the config file named in WRITABLE FILES and the reason stated — never change it silently.
 - "I'll skim the file instead of reading it before modifying" → read it fully; skimming IS the failure mode
 - "The previous code does it this way so it must be correct" → existing patterns can be wrong; verify behavior against requirements
 - "This is taking too long, I'll stop here" → no time pressure exists; report partial honest results, don't fake completion

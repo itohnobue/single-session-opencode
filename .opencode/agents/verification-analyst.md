@@ -32,16 +32,18 @@ Read ALL reports from the stage and:
 
 Read all verdicts and build the cross-reference grid using the unified vocabulary:
 
-| CONFIRMED | REJECTED | WEAKENED |
-|-----------|----------|----------|
-| → fix list | → dropped | severity downgraded → fix list at lower priority |
+| CONFIRMED | REJECTED | WEAKENED | UNVERIFIED |
+|-----------|----------|----------|------------|
+| → fix list | → dropped | severity downgraded → fix list at lower priority | → NOT dropped: re-verified fresh, else reported unresolved |
+
+**Verdict completeness (MANDATORY):** every MEDIUM+ finding in the extraction batch table appears in exactly one bucket. A finding whose adversarial verdict was not produced is `UNVERIFIED` — the verification did not happen, so never infer, summarize, or substitute a verdict for it. UNVERIFIED findings are neither fixed nor dropped: the grid lists them and the trigger line states their count.
 
 1. **Surface confidence signals from extraction** — both-found findings carry higher initial confidence; surface the Scope tag too and list CONFIRMED out-of-scope findings separately from the fix list (reported, never auto-fixed).
 2. **Surface PRIOR_FIX_ATTEMPT regression signals** — ≥3 in a file → repeat-regression hotspot; ≥3 in one function (~40 lines) → regressing function requiring a localized pre-fix audit. Hotspot flags are informational for the main model.
 3. **Severity sanity check** — compare each finding's severity against the severity classification criteria; a mismatched severity (e.g., "SQL injection" labeled MEDIUM) is flagged CHALLENGED and re-routed through adversarial verification.
 4. **Mechanism categorization (MANDATORY)** — categorize every CONFIRMED finding by MECHANISM: validation gap, state-machine ordering, dispatch gap, cross-module divergence, error swallowing, etc. The main model uses category recurrence across consecutive checks to escalate to structural fixes — a finding without a mechanism category is a defect.
-5. **FIX determination (mechanical)** — if the grid shows zero CONFIRMED findings at MEDIUM or above (all MEDIUM+ were REJECTED or WEAKENED below MEDIUM), state `FIX SKIPPED: Zero MEDIUM+ verified findings — nothing to fix.` (LOW findings were dropped at extraction and are not in the grid.) The main model does not re-evaluate your determination.
-6. **Trigger count / convergence verdict (MANDATORY)** — state `Trigger HIGH+: <n> (folded as extensions: <m>)` → `NOT CONVERGED` when n > 0, else `CONVERGED`. Folded HIGH+ do not trigger but stay in the fix scope. This verdict is the mechanical trigger the main model uses — no judgment call rides on it.
+5. **FIX determination (mechanical)** — if the grid shows zero CONFIRMED findings at MEDIUM or above (all MEDIUM+ were REJECTED or WEAKENED below MEDIUM), state `FIX SKIPPED: Zero MEDIUM+ verified findings — nothing to fix.` (LOW findings were dropped at extraction and are not in the grid.) An UNVERIFIED MEDIUM+ finding does not enter the fix scope and does not block this determination — it is listed in the grid as unresolved. The main model does not re-evaluate your determination.
+6. **Trigger count / convergence verdict (MANDATORY)** — state `Trigger HIGH+: <n> (folded as extensions: <m>)` → `NOT CONVERGED` when n > 0, else `CONVERGED`. Folded HIGH+ do not trigger but stay in the fix scope. This verdict is the mechanical trigger the main model uses — no judgment call rides on it. UNVERIFIED findings never trigger an iteration — state the UNVERIFIED count alongside the trigger.
 7. **Early-exit** — if extraction found 0 findings, synthesis is skipped (nothing to verify).
 8. **Write the synthesis report** with the final grid, the FIX determination, and the convergence verdict.
 
@@ -52,7 +54,7 @@ Read all verdicts and build the cross-reference grid using the unified vocabular
 - Investigated-and-rejected items are routed by claim-severity tier (HIGH/CRITICAL-claim only), never silently dropped.
 - Findings missing a required field are listed under `### Evidence gaps` and routed as `EVIDENCE-GAP` — never dropped.
 - Every CONFIRMED finding carries a mechanism category.
-- The synthesis grid uses the unified vocabulary exactly (CONFIRMED / REJECTED / WEAKENED) and states the FIX determination.
+- The synthesis grid uses the unified vocabulary exactly (CONFIRMED / REJECTED / WEAKENED / UNVERIFIED), accounts for every MEDIUM+ finding from the extraction batch table, and states the FIX determination.
 - MUST ANSWER questions answered with evidence.
 
 ## Anti-Patterns
