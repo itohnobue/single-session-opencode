@@ -162,7 +162,7 @@ For T3 findings-type tasks (reviews, audits, discovery) whose deliverable feeds 
 Before considering any T* run finished and before starting knowledge harvesting, the lead runs a sanity check of the original objective against produced evidence. Completeness only — not a correctness re-verification (that is the VERIFY block) and not an agent task; no report artifact.
 
 - Enumerate the original objective, every MUST ANSWER, every promised deliverable, and every open todo/pending item.
-- For each, confirm produced evidence exists: file:line diff, exact command output, test result, artifact on disk — and, for a run that changed code, the **Build gate** verdict with its stated scope. Plans, summaries, effort, and "the executor reported success" do NOT count.
+- For each, confirm produced evidence exists: file:line diff, exact command output, test result, artifact on disk — and, for a run that changed code, the **Build gate** verdict with its stated scope, or the gate's stated unavailability with what was checked instead. Plans, summaries, effort, and "the executor reported success" do NOT count.
 - Any uncovered / failed / open item → route it back to a fix run and re-check; do not report completion and do not harvest.
 - Clean → proceed to knowledge harvesting and delivery.
 
@@ -241,7 +241,7 @@ All 8 agents are native opencode subagents, auto-loaded from `.opencode/agents/*
 
 ### Reviewing agent output
 
-- Check the report exists and is non-empty — that's the primary gate
+- Check the report exists and is non-empty — that's the primary gate (for structural completeness of the named sections, see the structural-check note under Error Handling)
 - Read the report's findings and apply them to the main task
 - If an agent's output is wrong or incomplete: diagnose, fix the task, and re-spawn with corrections (see spawn discipline above)
 - Quality gates by pipeline stage: pre-spawn prompt check → prepare self-review → second-opinion flow (MEDIUM+) → optional VERIFY block (see VERIFY under Delegation Rules above), then the run-scoped **Build gate** whenever the run changed code (Quality Practices) — the delivery precondition.
@@ -598,7 +598,7 @@ TOOL-CHOICE LADDER (one question, one tool): "how does X flow / chain across mod
 | Scenario | Action |
 |----------|--------|
 | No report after exit (empty/blank result) | **Lead's choice — resume is the cheapest win** (then respawn second): re-invoke the task tool with the same session id (`task_id`) asking it to deliver — the session keeps its context and writes the report. Only if the resume fails, diagnose (bad prompt? missing dependency? environment?) and re-issue. |
-| Report exists but thin/partial (stub, no evidence, one-liners for a designed task) | **Lead option — resume is the cheapest win:** re-invoke with the same `task_id` asking it to deliver the missing substance per the brief; or re-issue fresh; or accept as-is. If resuming and still thin → diagnose (bad prompt/task), then re-issue fresh. |
+| Report exists but thin/partial (stub, no evidence, one-liners for a designed task) | **Lead option — resume is the cheapest win:** re-invoke with the same `task_id` asking it to deliver the missing substance per the brief; or re-issue fresh; or accept as-is — except a *missing mandatory section*, which is always resumable work, never an accept-as-is gap (see the structural-check note below). If resuming and still thin → diagnose (bad prompt/task), then re-issue fresh. |
 | MUST ANSWER question skipped | **Lead option — resume is the cheapest win:** re-invoke with the same `task_id` asking only the missing question; or re-issue fresh. Still missing after a resume → diagnose, re-issue fresh. |
 | Agent claims success but output wrong | Diagnose why (bad prompt? misunderstood task?). Fix the prompt/task. Re-issue. |
 | Agent aborted (same error 3×) | Diagnose root cause, fix environment/config, re-issue the task call. If it fails a 4th time, do the work directly or discuss with the user. |
@@ -607,7 +607,7 @@ TOOL-CHOICE LADDER (one question, one tool): "how does X flow / chain across mod
 
 > **Reuse ≠ respawn** — resuming the same `task_id` takes no access to the `-r2/-r3` respawn budget; respawn stays a separate path (same name, fresh run). Recovery resumes (this table) count toward the 3-resume threshold (R3). Re-issued fresh replacements (diagnose → re-issue) start a new run with a new threshold.
 > **R2 agents** (`adversarial-reviewer`, `postfix-reviewer`, second-opinion runs) are never resumed — recovery is a fresh respawn (see R2).
-> **Structural-check legality:** the structural check is *template membership* only — the exact `REPORT FORMAT` sections from `coordination-*.txt`: code → `### Summary`, `### Changes`, `### Test Results`, `### Investigated-and-Rejected`, `### MUST ANSWER Responses`, `### Verified`, `### Not Covered`; review → `### Summary`, `### Findings`, `### Investigated-and-Rejected`, `### Fix Design (investigative/T3 reviews)`, `### MUST ANSWER Responses`, `### Verified`, `### Not Covered`. Compare the report body for presence only, NEVER content. A missing section is resumable work — and a section with nothing to report is present with "NONE", not absent (an absent `### Investigated-and-Rejected` silently starves the adversarial RE-EXAMINE routing).
+> **Structural-check legality:** the structural check is *template membership* only — the exact `REPORT FORMAT` sections of the assembled template: **code** (`coordination-code.txt`) → `### Summary`, `### Changes`, `### Test Results`, `### Investigated-and-Rejected`, `### MUST ANSWER Responses`, `### Verified`, `### Not Covered`; **review and research** (both use `coordination-review.txt`) → `### Summary`, `### Findings`, `### Investigated-and-Rejected`, `### Fix Design (investigative/T3 reviews)`, `### MUST ANSWER Responses`, `### Verified`, `### Not Covered`; **prepare** (`coordination-prepare.txt`) → `### Summary`, `### Tech → Query → Source Mapping`, `### Selection / Exclusions`, `### Confidence Breakdown`, `### MUST ANSWER Responses`. Compare the report body for presence only, NEVER content. A missing section is resumable work — never an accept-as-is gap — and a section with nothing to report is present with "NONE", not absent (an absent `### Investigated-and-Rejected` silently starves the adversarial RE-EXAMINE routing).
 
 ---
 
