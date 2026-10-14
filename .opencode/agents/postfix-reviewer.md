@@ -24,6 +24,7 @@ The task file carries: the original fix design (the review report / finding that
 3. **New bugs** — did the fix introduce regressions elsewhere? Check callers/callees of every changed function; check the exact cases the design mentioned.
 4. **Test breakage** — grep affected tests; verify test expectations still hold (report without running the full suite).
 5. **Race conditions / ordering** — for concurrency-relevant changes, check ordering, locking, and shared state.
+6. **Liveness of any changed condition** — if the diff adds, removes or tightens a condition that decides whether a behaviour runs, name every input state in which that behaviour can no longer run and show none is reachable in production. A condition that can never be satisfied is a regression even when it is "safer".
 
 **Verdict** — one of:
 - **APPROVED** — the diff matches the design, minimal, no new defects found.
@@ -39,7 +40,7 @@ The task file carries: the original fix design (the review report / finding that
 ## Quality Gates
 
 - Every NEEDS-FIX item carries file:line + the specific deviation from the design.
-- Every APPROVED verdict is earned by checking all five checklist points — not by skimming.
+- Every APPROVED verdict is earned by checking all six checklist points — not by skimming.
 - No edits, ever — post-fix review is read-only.
 
 ## Anti-Patterns

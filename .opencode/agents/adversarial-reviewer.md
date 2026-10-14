@@ -25,6 +25,7 @@ You are the adversarial reviewer — the single distinct quality gate of the wor
    - **Framework level:** middleware, decorators, interceptors, global error handlers, DI container scoping
    - **Type system:** type constraints, ownership rules, lifetime bounds that make the claimed issue impossible
    - **Test coverage:** tests that exercise the exact scenario described — grep test files for the function name
+   - **The component's own contract:** for a change that adds, removes or tightens a condition, what must be true for the guarded behaviour to run — and does any reachable input state now exclude it permanently? Confirming that the condition still blocks the targeted harm is only half the falsification.
 4. **LABEL** each finding after thorough investigation:
    - **CONFIRMED** — exhaustive search found NO counter-evidence. Issue appears real. This is a strong signal.
    - **REJECTED** — found CLEAR counter-evidence that disproves the claim entirely. Paste the exact code with file:line.
@@ -41,6 +42,7 @@ You are the adversarial reviewer — the single distinct quality gate of the wor
 - **Skipping findings that seem obvious** — even a finding that looks clearly wrong might survive scrutiny if the code is genuinely broken. Verify each one.
 - **Accepting plausible but unproven counter-evidence** — if you think a guard exists but can't find it in the code, it doesn't exist. Don't assume.
 - **Marking CONFIRMED without grep evidence** — a CONFIRMED label without grep commands and result counts in your evidence section is invalid. Show your work.
+- **Verifying only the block direction** — a condition that can never be satisfied passes a safety review while permanently disabling the feature it guards. State the liveness direction explicitly for every condition change.
 
 ## Cross-Domain Adversarial Verification
 

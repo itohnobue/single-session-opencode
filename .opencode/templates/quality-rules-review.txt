@@ -14,6 +14,7 @@ Mandatory verification before claiming (skip = finding auto-rejected):
 Core rules:
 - Read every file BEFORE making claims about it
 - Every finding MUST include file:line, code snippet, severity, supporting grep evidence, a one-line reachability/trigger statement, and a mechanism class (e.g. validation gap, state-machine ordering, dispatch gap, cross-module divergence, error swallowing)
+- Verifying a change that adds, removes or tightens a condition (guard, predicate, threshold, budget, cursor, state check, permission check, lifecycle signal): verify BOTH directions — the BLOCK direction (the harm the change targets is still prevented) and the LIVENESS direction (no reachable input state now disables the guarded behaviour permanently). A verification that checks only the BLOCK direction is incomplete: report the LIVENESS direction as unverified rather than passing it.
 - Follow existing patterns and conventions
 - Cannot determine → "UNABLE TO DETERMINE", do NOT guess
 - Do NOT expand scope beyond task
