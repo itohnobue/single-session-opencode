@@ -220,11 +220,13 @@ def _rotate() -> None:
             pass
 
 
-def _write_report(path: Path, header: dict, body: str) -> None:
+def _write_report(path: Path, header: dict, body: str) -> int:
+    """Write the report and return the 1-based line where the page text starts."""
     lines = [f"=== {header['url']} ==="]
     lines += [f"{k}: {v}" for k, v in header.items() if k != "url"]
-    lines += ["", body.strip(), ""]
-    path.write_text("\n".join(lines), encoding="utf-8")
+    lines += [""]
+    path.write_text("\n".join(lines + [body.strip(), ""]), encoding="utf-8")
+    return len(lines) + 1
 
 
 def _settle(page, minimum_s: int, cap_s: int) -> int:
@@ -318,7 +320,7 @@ def _fetch_one(page, url: str, wait_s: int, max_wait_s: int, scroll: bool, scree
             header["screenshot"] = rec["screenshot"]
         REPORT_DIR.mkdir(parents=True, exist_ok=True)
         path = REPORT_DIR / f"{run_id}-chrome-{idx}-{_slug(url)}.txt"
-        _write_report(path, header, body)
+        rec["body_line"] = _write_report(path, header, body)
         rec["report"] = str(path)
     except Exception as exc:  # noqa: BLE001
         # Playwright's own TimeoutError is the one failure the documented vocabulary
@@ -327,6 +329,16 @@ def _fetch_one(page, url: str, wait_s: int, max_wait_s: int, scroll: bool, scree
             rec["outcome"] = "timeout"
         rec["error"] = f"{type(exc).__name__}: {exc}"
     return rec
+
+
+def _report_line(rec: dict) -> str:
+    """The ONE line for a browser-fetch record (path, verdict, first text line)."""
+    path = rec.get("report")
+    if not path:
+        return (f"REPORT: none | OUTCOME: {rec['outcome']} | {rec['url']} "
+                f"({rec.get('error') or 'no report'})")
+    return (f"REPORT: {path} | OUTCOME: {rec['outcome']} | "
+            f"page text from line {rec.get('body_line', 3)}")
 
 
 def main() -> int:
@@ -385,12 +397,11 @@ def main() -> int:
     for rec in results:
         path = rec.get("report")
         if not path:
-            print(f"Failed: {rec['url']}: {rec.get('error')}", file=sys.stderr)
+            # One line per record, on stderr: the record failed, no file exists.
+            print(_report_line(rec), file=sys.stderr)
             continue
-        print(f"Full web page saved at: {path}")
-        print(f"OUTCOME: {rec['outcome']} | title: {rec.get('title')} | "
-              f"{rec.get('chars', 0)} chars | {rec.get('final_url')}")
-        print(f"FULL REPORT: {path}")
+        # One line per record on stdout: path, verdict, where the page text starts.
+        print(_report_line(rec))
 
     ok = any(r["outcome"] == "ok" for r in results)
     return 0 if ok else 2

@@ -13,17 +13,22 @@ Unified tool combining search and fetch into a single optimized workflow:
 3. Fetch content in parallel via Scrapling (TLS fingerprinting, anti-bot bypass)
 4. Scrapling text extraction fallback for "Too short" pages
 5. Search mode: full filtered text is written to a report file in
-   tmp/webresearch/ (run-id.txt); stdout carries a compact technical
-   index (FULL REPORT path first + stats + one line per page with
-   @line/@hit locators) — the SAME index heads the report file itself,
-   so a lost stdout digest is recoverable from the file. The model
-   researches from the report file (read/grep by @line), not from stdout.
+   tmp/webresearch/ (run-id.txt). stdout carries exactly ONE line:
+   `REPORT: <path> | INDEX lines 1-<D> | <N> pages[, <M> fetch failures]`.
+   The file's first D lines are the INDEX: query + one line per page
+   (`N. [date] line L — Title — URL`, L = absolute line of that page's
+   `=== <url> ===` header), then NOTES — fetch failures per URL, dropped-
+   page counters, dedup counts, search backend/attempts/since, truncations,
+   warnings. Page text follows a `---` line. The model reads the index
+   first and jumps to pages by line number; one line of stdout cannot be
+   lost to a trimming pipeline.
 6. --url direct fetch: ONE URL per invocation. The full page is fetched
    (no output char cap; HTML extraction bounded by MAX_CONTENT_BYTES) and
    saved RAW to its own report file in tmp/webresearch/ (run-id.txt) —
    RAW = quality filters off and full-document DOM extraction (no
    content-area selection): every visible text node in page order,
-   nav/boilerplate included. stdout prints ONLY the absolute path.
+   nav/boilerplate included. stdout prints ONLY one line:
+   `REPORT: <path> | page text from line 3`.
    JS pages and bot-gated pages are retried with a real browser —
    Google Chrome, driven by browser_fetch.py (the --url-chrome tier) and
    provisioned repo-locally into tmp/browser/chrome/ on first use:
@@ -80,6 +85,7 @@ import shutil
 import string
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import types
@@ -478,14 +484,15 @@ CROSS_PAGE_DEDUP_MIN_LEN: int = 30           # only dedup lines at least this lo
 MIN_SCORING_POOL: int = 15
 
 # =============================================================================
-# DIGEST + REPORT FILE (search-path output)
+# REPORT FILE OUTPUT (search path)
 # =============================================================================
-# Search mode writes the full filtered text to a report file under
-# <REPO_ROOT>/tmp/webresearch/ and prints a compact digest to stdout; the
-# model researches from the file (read/grep), not from the inline output.
+# Search mode writes the index (header + per-page lines + NOTES) and the full
+# filtered text to a report file under <REPO_ROOT>/tmp/webresearch/, and prints
+# ONE line to stdout. The model researches from the file (read/grep), never
+# from the inline output.
 
 REPORT_DIR_NAME: str = "webresearch"        # subdirectory of <REPO_ROOT>/tmp/
-REPORT_PAGE_CEILING: int = 200_000          # per-page text ceiling in the file (memory sanity; digest is a line-per-page index, see _build_digest)
+REPORT_PAGE_CEILING: int = 200_000          # per-page text ceiling in the file (memory sanity; the index carries one line per page, see _build_index)
 REPORT_MAX_AGE_DAYS: int = 7                # rotation: delete files older than this
 REPORT_MAX_FILES: int = 30                  # rotation: keep only the N newest
 
@@ -802,9 +809,16 @@ class ProgressReporter:
         self._total_start: float = time.monotonic()
         self._ok_count = 0
         self._failures: List[Tuple[str, str, float]] = []  # (url, error, elapsed)
+        # Repetitive progress is for a human at a terminal. When stderr is
+        # captured (an agent harness), it is noise that can crowd the one
+        # stdout REPORT line out of a `2>&1 | head/tail` window — the durable
+        # copy of every counter lives in the report's NOTES block.
+        self._tty = sys.stderr.isatty()
 
     def message(self, msg: str) -> None:
-        if not self.quiet:
+        # Progress/notice lines are for a human at a terminal; their durable
+        # copies (counters, failures, errors) live in the report's NOTES block.
+        if not self.quiet and self._tty:
             print(msg, file=sys.stderr)
 
     def phase_start(self, name: str) -> None:
@@ -812,7 +826,7 @@ class ProgressReporter:
 
     def phase_end(self, name: str) -> None:
         elapsed = time.monotonic() - self._phase_start
-        if not self.quiet:
+        if not self.quiet and self._tty:
             print(f"  [{name}] {elapsed:.1f}s", file=sys.stderr)
 
     def url_result(self, url: str, success: bool, elapsed: float, error: str = "") -> None:
@@ -828,7 +842,7 @@ class ProgressReporter:
                 print(f"    --  {elapsed:4.1f}s  {domain} ({error})", file=sys.stderr)
 
     def update(self, phase: str, current: int, total: int) -> None:
-        if self.quiet or self.verbose:
+        if self.quiet or self.verbose or not self._tty:
             return
         elapsed = time.monotonic() - self._phase_start
         line = f"\r    {phase}: {current}/{total} ({self._ok_count} ok, {elapsed:.0f}s)"
@@ -837,12 +851,12 @@ class ProgressReporter:
         self._last_line_len = len(line)
 
     def newline(self) -> None:
-        if not self.quiet and not self.verbose:
+        if not self.quiet and not self.verbose and self._tty:
             print(file=sys.stderr)
             self._last_line_len = 0
 
     def summary(self, fetched_ok: int, total: int, chars: int) -> None:
-        if self.quiet:
+        if self.quiet or not self._tty:
             return
         total_elapsed = time.monotonic() - self._total_start
         rate = (fetched_ok / total * 100) if total > 0 else 0
@@ -2443,18 +2457,16 @@ def _fetch_with_real_browser(url: str, timeout: int = 180) -> Optional[FetchResu
     except (OSError, subprocess.SubprocessError):
         return None
     out = f"{proc.stdout or ''}\n{proc.stderr or ''}"
-    m = re.search(r"^OUTCOME:\s*(\w+)", out, re.M)
-    if m is None:
-        # No OUTCOME line: the wrapper never got as far as the browser (provisioning,
+    status, report_path = _parse_browser_output(out)
+    if status is None:
+        # No OUTCOME field: the wrapper never got as far as the browser (provisioning,
         # uv or launch failure) — the tier is unusable, nothing was fetched.
         return None
-    status = m.group(1)
-    path_m = re.search(r"^FULL REPORT:\s*(.+)$", out, re.M)
-    if status != "ok" or not path_m:
+    if status != "ok" or not report_path:
         return FetchResult(url=url, success=False, error=f"browser {status}",
                            source="chrome")
     try:
-        raw = Path(path_m.group(1).strip()).read_text(encoding="utf-8", errors="replace")
+        raw = Path(report_path).read_text(encoding="utf-8", errors="replace")
     except OSError:
         return FetchResult(url=url, success=False, error="browser report unreadable",
                            source="chrome")
@@ -4535,25 +4547,7 @@ def _recency_filter(results: List[FetchResult], query: str) -> Tuple[List[FetchR
 
 
 # =============================================================================
-# BATCH OUTPUT FORMATTERS (for non-streaming mode)
-# =============================================================================
-
-def format_batch_raw(results: List[FetchResult]) -> str:
-    """Format all results as raw text (optimized with StringIO)."""
-    buffer = StringIO()
-    for r in results:
-        if r.success:
-            buffer.write(f"=== {r.url} ===\n")
-            images_line = _images_line(r.images)
-            if images_line:
-                buffer.write(images_line)
-            buffer.write(r.content)
-            buffer.write("\n\n")
-    return buffer.getvalue()
-
-
-# =============================================================================
-# DIGEST + REPORT FILE OUTPUT (search path)
+# REPORT FILE OUTPUT (search path)
 # =============================================================================
 
 def _report_root() -> Path:
@@ -4649,7 +4643,7 @@ def _build_report_file(pages: List[Tuple[FetchResult, str, bool]]) -> Tuple[str,
 
     Returns (content, start_lines): start_lines[i] is the 1-based line number
     of the i-th page's `=== <url> ===` header within the returned content.
-    Line accounting must be exact — the digest's @line/@hit locators are
+    Line accounting must be exact — the index's `line N` locators are
     computed from these values (never by the model).
     """
     buffer = StringIO()
@@ -4660,153 +4654,172 @@ def _build_report_file(pages: List[Tuple[FetchResult, str, bool]]) -> Tuple[str,
         segment = f"=== {r.url} ===\n" + _images_line(r.images) + text + "\n\n"
         buffer.write(segment)
         # splitlines() counts consumed lines exactly (trailing-newline cases
-        # and empty separator lines included) — @line/@hit depend on this.
+        # and empty separator lines included) — `line N` depends on this.
         line += len(segment.splitlines())
     return buffer.getvalue(), start_lines
 
 
-def _human_chars(n: int) -> str:
-    """Compact char count for the digest: 14200 -> '14.2K', 900 -> '900'."""
-    if n >= 1000:
-        return f"{n / 1000:.1f}K"
-    return str(n)
+def _notes_lines(
+    failures: List[FetchResult],
+    quality_stats: Optional[dict],
+    search_status: Optional[dict],
+    f3_stats: Optional[dict],
+    truncated_pages: int,
+    since: str,
+    warnings: Optional[List[str]] = None,
+    extra: Optional[List[str]] = None,
+) -> List[str]:
+    """The index's NOTES block: every diagnostic the run produced.
 
-
-QUERY_STOPWORDS = frozenset(
-    """the a an and or but for in on of to with from by at as is are was were be been
-    being do does did can could should would may might will shall not no yes so if
-    then than that this these those it its you your we our they their he she him her
-    them i me my what which who whom when where why how about into over under between
-    through during before after above below again further once here there all any both
-    each few more most other some such only own same too very just also has have had""".split()
-)
-
-
-def _query_key_terms(query: str) -> List[str]:
-    r"""Up to 2 significant query terms for @hit locators; [] when none.
-
-    `\w` (unicode-aware) keeps non-English queries working (Cyrillic/CJK);
-    the 3-char minimum skips particles, and `+`/non-word chars split tokens
-    (so "C++" yields no term by itself but "C++ pitfalls" yields "pitfalls").
+    Nothing here goes to stdout (one line only) and nothing is dropped:
+    per-URL fetch failures, quality-filter drop counters, dedup savings,
+    search backend/attempts/error, truncations, warnings.
     """
-    terms: List[str] = []
-    for word in re.findall(r"\w[\w-]{2,}", query.lower()):
-        if word not in QUERY_STOPWORDS and word not in terms:
-            terms.append(word)
-        if len(terms) == 2:
-            break
-    return terms
+    lines: List[str] = ["NOTES"]
+    for r in failures:
+        lines.append(f"- fetch failed: {r.url} — {r.error or 'unknown error'}")
+    if quality_stats:
+        counters = {k: quality_stats.get(k, 0) for k in
+                    ("farm_dropped", "stub_dropped", "stale_dropped", "dedup_dropped")}
+        if any(counters.values()) or quality_stats.get("recency_skipped"):
+            dropped = (
+                f"- dropped: farm {counters['farm_dropped']}, "
+                f"stub {counters['stub_dropped']}, "
+                f"stale {counters['stale_dropped']}, "
+                f"dedup {counters['dedup_dropped']}"
+            )
+            if quality_stats.get("recency_skipped"):
+                dropped += " (recency not applied: too few dated pages)"
+            lines.append(dropped)
+    if f3_stats:
+        lines.append(
+            f"- duplicate sentences removed: {f3_stats.get('exact_dropped', 0)} exact, "
+            f"{f3_stats.get('near_dropped', 0)} near"
+        )
+    status = search_status or {}
+    backend = ["ddg"] if (status.get("ddg_urls") or not status.get("deepseek_urls")) else []
+    if status.get("deepseek_urls"):
+        backend.append("deepseek")
+    search_bits = [f"- search: {'+'.join(backend) or 'unknown'}"]
+    if status.get("search_attempts"):
+        attempts = int(status["search_attempts"])
+        search_bits.append(f"{attempts} attempt" + ("" if attempts == 1 else "s"))
+    if since:
+        search_bits.append(f"since {since}")
+    search_bits.append("order relevance")
+    if status.get("search_error"):
+        search_bits.append(f"error: {status['search_error']}")
+    lines.append(", ".join(search_bits))
+    if truncated_pages:
+        lines.append(f"- truncated: {truncated_pages} page(s) at 200k chars")
+    for warning in (warnings or []):
+        lines.append(f"- warning: {warning}")
+    for item in (extra or []):
+        lines.append(f"- {item}")
+    return lines
 
 
-def _find_hit_line(text: str, terms: List[str]) -> Optional[int]:
-    """1-based line within `text` of the first line containing any key term."""
-    if not terms:
-        return None
-    for idx, line in enumerate(text.splitlines(), 1):
-        low = line.lower()
-        if any(t in low for t in terms):
-            return idx
-    return None
-
-
-def _build_digest(
+def _build_index(
     query: str,
     pages: List[Tuple[FetchResult, str, bool]],
     failures: List[FetchResult],
-    report_path: Path,
-    quality_stats: Optional[dict] = None,
+    notes: List[str],
     start_lines: Optional[List[int]] = None,
-    terms: Optional[List[str]] = None,
     line_offset: int = 0,
-    since: str = "",
 ) -> str:
-    """Technical index digest: FULL REPORT path FIRST and LAST, stats, one
-    technical line per page (`N. [size] [date] [trunc] @line L @hit H — Title — URL`,
-    the date field omitted when the page is undated).
+    """The index that heads the report file: header, one line per page, NOTES.
 
-    start_lines: 1-based `=== <url> ===` header lines relative to the report
-    content; line_offset: lines the digest + separator occupy at the top of the
-    final file — so @line/@hit values are absolute in the written report file.
-    The digest is small by design (~25 lines): nothing to trim.
-
-    quality_stats (from F5/F7) is appended to the stats line as extra
-    counters; the base format is unchanged so downstream consumers keep working.
+    `line N` is the ABSOLUTE line of that page's `=== <url> ===` header in the
+    final report file (start_lines are relative to the page text; line_offset is
+    index length + separator). Line accounting must stay exact — the locators
+    are computed here, never by the model.
     """
-    total_chars = sum(len(text) for _, text, _ in pages)
-    reasons = list(dict.fromkeys(r.error for r in failures if r.error))
-    reason_part = f" ({', '.join(reasons)})" if reasons else ""
-    quality_part = ""
-    if quality_stats:
-        qparts = []
-        if quality_stats.get("farm_dropped"):
-            qparts.append(f"farm-dropped: {quality_stats['farm_dropped']}")
-        if quality_stats.get("stub_dropped"):
-            qparts.append(f"stub-dropped: {quality_stats['stub_dropped']}")
-        if quality_stats.get("stale_dropped"):
-            qparts.append(f"stale-dropped: {quality_stats['stale_dropped']}")
-        # Always visible (even at 0): pages dropped below the 50-char floor by
-        # cross-page dedup used to be completely silent; hiding the counter at
-        # 0 would recreate that silence in the common case. Appended; existing
-        # counters unchanged (backward-compatible).
-        qparts.append(f"dedup-dropped: {quality_stats.get('dedup_dropped', 0)}")
-        if qparts:
-            quality_part = " | " + " | ".join(qparts)
-    full_report_line = f"FULL REPORT: {report_path} — grep or read this file for full content"
-    since_part = f" | since: {since}" if since else ""
-    lines = [
-        full_report_line,
-        f"RESEARCH: {query}",
-        f"Results: {len(pages)} fetched, {len(failures)} failed{reason_part} | {total_chars:,} chars{quality_part}{since_part} | ordered by relevance",
+    failed = len(failures)
+    failure_note = ""
+    if failed:
+        failure_note = f" | {failed} fetch failure" + ("" if failed == 1 else "s")
+    header = [
+        f"QUERY: {query}",
+        f"PAGES: {len(pages)}{failure_note}",
     ]
-    for i, (r, text, truncated) in enumerate(pages, 1):
-        size = f"[{_human_chars(len(text))}{' trunc' if truncated else ''}]"
-        date_part = f" {_format_digest_date(r.date, r.date_source)}" if r.date else ""
+    body: List[str] = []
+    for i, (r, _text, _truncated) in enumerate(pages, 1):
         base = start_lines[i - 1] + line_offset if start_lines else 0
-        # A `[images] …` line sits between the header and the page text, so a
-        # relative text hit shifts by one before it is made absolute.
-        img_offset = 1 if r.images else 0
-        hit = _find_hit_line(text, terms) if terms else None
-        hit_part = f" @hit {base + img_offset + hit}" if hit else ""
+        date_part = f" {_format_digest_date(r.date, r.date_source)}" if r.date else ""
         if r.title:
-            lines.append(f"{i}. {size}{date_part} @line {base}{hit_part} — {r.title} — {r.url}")
+            body.append(f"{i}.{date_part} line {base} — {r.title} — {r.url}")
         else:
-            lines.append(f"{i}. {size}{date_part} @line {base}{hit_part} — {r.url}")
-    lines.append(full_report_line)
-    return "\n".join(lines)
+            body.append(f"{i}.{date_part} line {base} — {r.url}")
+    return "\n".join(header + body + notes)
 
 
 def _assemble_report(
     query: str,
     pages: List[Tuple[FetchResult, str, bool]],
     failures: List[FetchResult],
-    report_path: Path,
     quality_stats: Optional[dict],
     since: str = "",
-) -> Tuple[str, str]:
-    """Return (digest, report_content) for one run.
+    search_status: Optional[dict] = None,
+    f3_stats: Optional[dict] = None,
+    warnings: Optional[List[str]] = None,
+    extra_notes: Optional[List[str]] = None,
+) -> Tuple[str, int]:
+    """Return (file_content, index_line_count) for one run.
 
-    The report file = the digest (index) + a `---` separator + the page
-    content, so the artifact is self-contained: the stdout digest and the file
-    head are identical, and @line/@hit values are absolute in the final file.
-    The offset (digest lines + separator) is computed from a probe digest —
-    line COUNT does not depend on the values, so the second build is exact.
+    The report file = INDEX + `---` + page text, so the artifact is
+    self-contained and every `line N` is absolute in the final file. The
+    offset (index lines + separator) is computed from a probe index — line
+    COUNT does not depend on the values, so the second build is exact. With
+    no pages the file is the index alone (failure details still land on disk).
     """
+    notes = _notes_lines(
+        failures, quality_stats, search_status, f3_stats,
+        sum(1 for _, _, t in pages if t), since, warnings, extra_notes,
+    )
+    if not pages:
+        index = _build_index(query, pages, failures, notes)
+        return index, len(index.splitlines())
     content, start_lines = _build_report_file(pages)
-    terms = _query_key_terms(query)
-    probe = _build_digest(query, pages, failures, report_path, quality_stats, start_lines, terms, 0, since)
+    probe = _build_index(query, pages, failures, notes, start_lines, 0)
     offset = len(probe.splitlines()) + 1  # +1 = the `---` separator line
-    digest = _build_digest(query, pages, failures, report_path, quality_stats, start_lines, terms, offset, since)
-    return digest, digest + "\n---\n" + content
+    index = _build_index(query, pages, failures, notes, start_lines, offset)
+    return index + "\n---\n" + content, len(index.splitlines())
 
 
-def _write_report_file(path: Path, content: str) -> bool:
-    """Write the report file. Returns False on failure (caller falls back to inline raw)."""
+def _report_line(path: Path, index_lines: int, page_count: int, failures: int) -> str:
+    """The ONE stdout line of search mode. This is the whole stdout contract."""
+    failure_part = ""
+    if failures:
+        failure_part = f", {failures} fetch failure" + ("" if failures == 1 else "s")
+    empty_part = " — no usable results" if page_count == 0 else ""
+    return (f"REPORT: {path} | INDEX lines 1-{index_lines} | "
+            f"{page_count} pages{failure_part}{empty_part}")
+
+
+def _parse_browser_output(out: str) -> Tuple[Optional[str], Optional[str]]:
+    """(status, report_path) from the Chrome tier's output; path is None when absent.
+
+    The tier prints one line per record: `REPORT: <path> | OUTCOME: <status> | …`,
+    or `REPORT: none | OUTCOME: <status> | <url>` when no report was written.
+    status is None when no OUTCOME field appeared (the tier never ran).
+    """
+    status_m = re.search(r"\bOUTCOME:\s*(\w+)", out)
+    path_m = re.search(r"^REPORT:\s*(.+?)\s*\|\s*OUTCOME:", out, re.M)
+    status = status_m.group(1) if status_m else None
+    path = path_m.group(1).strip() if path_m else None
+    if path and path.lower() == "none":
+        path = None
+    return status, path
+
+
+def _write_report_file(path: Path, content: str) -> Optional[str]:
+    """Write the report file. Returns None on success, the error text on failure."""
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
-        return True
-    except Exception:
-        return False
+        return None
+    except Exception as e:  # noqa: BLE001 — every write path must report, never crash
+        return f"{type(e).__name__}: {e}"
 
 
 # =============================================================================
@@ -5358,7 +5371,8 @@ Examples:
 Search: DuckDuckGo (static, no API key)
 Fetch: Scrapling AsyncFetcher (TLS fingerprinting); failed or gated fetches are retried with real Google Chrome (the --url-chrome tier, provisioned into tmp/browser/chrome)
 Extract: trafilatura > regex > Scrapling DOM parser (tiered fallback)
-Full page saved to tmp/webresearch/, path printed to stdout
+Search mode: ONE stdout line (report path + index line range); --url: ONE line (path + first page-text line)
+Full page saved to tmp/webresearch/; the report file's first lines are its index
 Blocked domains: facebook.com, tiktok.com, instagram.com, linkedin.com, youtube.com, msn.com, percona.com, mctlaw.com, edmunds.com, cars.com, reddit.com
 Routed access: scholarly publishers and doi.org resolve to open-access full text; nytimes.com and forbes.com fall back to the Wayback copy
 Structured sources: RSS/Atom feeds, Hacker News threads, arXiv full text, PDFs (pdftotext or the bundled pypdf extractor)
@@ -5569,8 +5583,8 @@ Structured sources: RSS/Atom feeds, Hacker News threads, arXiv full text, PDFs (
             "ms": int((time.monotonic() - t0) * 1000), "timeout": False,
             **_quality_fields([result]),
         })
-        # Exactly ONE line on stdout: the absolute path of the saved file.
-        print(f"Full web page saved at: {path}")
+        # Exactly ONE line on stdout: the report path + where the page text starts.
+        print(f"REPORT: {path} | page text from line 3")
         sys.exit(0)
 
     if not args.query:
@@ -5585,17 +5599,21 @@ Structured sources: RSS/Atom feeds, Hacker News threads, arXiv full text, PDFs (
 
     queries = [args.query]
 
+    # Diagnostics that reach the report's NOTES block (never stdout).
+    run_warnings: List[str] = []
+
     def make_config(query: str) -> ResearchConfig:
         # DeepSeek backend: enabled by the env toggle, usable only with a key.
         # A missing key degrades to DuckDuckGo with one warning — never a failure.
         ds_key = resolve_deepseek_key() if deepseek_enabled() else None
         if deepseek_enabled() and not ds_key:
-            print(
-                "DeepSeek search: WEB_RESEARCH_DEEPSEEK is enabled but no API key "
-                "was found (set DEEPSEEK_API_KEY or provider.deepseek.options.apiKey "
-                "in ~/.config/opencode/opencode.json); continuing with DuckDuckGo only",
-                file=sys.stderr,
+            warning = (
+                "WEB_RESEARCH_DEEPSEEK is enabled but no API key was found (set "
+                "DEEPSEEK_API_KEY or provider.deepseek.options.apiKey in "
+                "~/.config/opencode/opencode.json); continuing with DuckDuckGo only"
             )
+            run_warnings.append(warning)
+            print(f"DeepSeek search: {warning}", file=sys.stderr)
         return ResearchConfig(
             query=query,
             scientific=args.sci,
@@ -5642,30 +5660,29 @@ Structured sources: RSS/Atom feeds, Hacker News threads, arXiv full text, PDFs (
         quality_fields = _quality_fields(results)
         pages: List[Tuple[FetchResult, str, bool]] = []
         failures: List[FetchResult] = []
+        quality_stats: dict = {"farm_dropped": 0,
+                               "stale_dropped": 0,
+                               "stub_dropped": 0, "dedup_dropped": 0}
+        f3_stats: dict = {}
         if results:
             # F5 first: page-level farm/syndication detection must see the FULL
             # bodies (sentence dedup would gut near-identical copies and destroy
             # the page-level Jaccard signal). Stub drop runs alongside it. Then
             # the existing sentence dedup.
-            quality_stats: dict = {"farm_dropped": 0,
-                                   "stale_dropped": 0,
-                                   "stub_dropped": 0, "dedup_dropped": 0}
             if QUALITY_FILTERS_ENABLED:
                 results, stub_st = _drop_stub_pages(results)
                 quality_stats["stub_dropped"] += stub_st.get("stub_dropped", 0)
                 results, f5_st = _dedup_farm_pages(results)
                 quality_stats["farm_dropped"] += f5_st.get("farm_dropped", 0)
             results, dedup_st = _dedup_results(results)
-            # Count pages the dedup shrank below the 50-char floor (previously
-            # only a debug log; I7: make the drop observable in the digest).
+            # Pages the dedup shrank below the 50-char floor (I7: observable).
             quality_stats["dedup_dropped"] = dedup_st.pages_dropped
             if QUALITY_FILTERS_ENABLED:
                 results, f7_st = _recency_filter(results, config.query)
                 quality_stats.update(f7_st)
-            results, _f3_st = _dedup_cross_page_sentences(results)
-            # Digest + report-file output: the file holds the full filtered text
-            # (grep-safe), stdout carries only the compact digest. If the file
-            # cannot be written, fall back to the old inline raw output.
+            results, f3_stats = _dedup_cross_page_sentences(results)
+            # Report-file output: the file holds the index + the full filtered
+            # text (grep-safe). stdout carries one REPORT line — never page text.
             pages = _prepare_report_pages(results)
             failures = [r for r in results if not r.success]
         log_usage({
@@ -5680,41 +5697,44 @@ Structured sources: RSS/Atom feeds, Hacker News threads, arXiv full text, PDFs (
             "deepseek_fetch_attempts": _DEEPSEEK_FETCH_ATTEMPTS,
             **quality_fields,
         })
-        if pages:
-            report_path = _report_dir() / f"{_make_run_id(config.query)}.txt"
-            digest, report_content = _assemble_report(config.query, pages, failures, report_path, quality_stats, since=config.since)
-            if _write_report_file(report_path, report_content):
-                print(digest)
-                # Redundant path on stderr: harnesses capture both streams, and
-                # the path must survive any stdout trimming.
-                print(f"FULL REPORT: {report_path}", file=sys.stderr)
-            else:
-                print(format_batch_raw(results))
-        elif ok:
-            # Every fetched page was dropped downstream (quality filters
-            # F5/F7, stub/sentence dedup) or filtered to empty text. Exit
-            # non-zero — matching --url mode — instead of the old silent exit-0.
-            print(
-                f"No results: all {len(ok)} fetched pages were dropped by quality filters "
-                "(farm/recency/stub/dedup) or filtered to empty text",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-        elif results:
-            # Every fetched page failed (fetch errors, HTTP 403, CAPTCHA...).
-            print(f"No results: all {len(results)} fetched pages failed", file=sys.stderr)
-            sys.exit(1)
-        else:
-            attempts = search_status.get("search_attempts", 1)
-            err = search_status.get("search_error")
-            if attempts > 1 or err:
-                print(
-                    f"No results: search backend returned 0 URLs after {attempts} attempt(s)"
-                    + (f" ({err})" if err else ""),
-                    file=sys.stderr,
+        extra_notes: List[str] = []
+        if not pages:
+            if ok:
+                extra_notes.append(
+                    f"no usable results: all {len(ok)} fetched pages were dropped by "
+                    "quality filters (farm/recency/stub/dedup) or filtered to empty text"
                 )
+            elif results:
+                extra_notes.append(f"no usable results: all {len(results)} fetched pages failed")
             else:
-                print("No results found", file=sys.stderr)
+                attempts = search_status.get("search_attempts", 1)
+                err = search_status.get("search_error")
+                extra_notes.append(
+                    f"no usable results: search backend returned 0 URLs after "
+                    f"{attempts} attempt(s)" + (f" ({err})" if err else "")
+                )
+        report_path = _report_dir() / f"{_make_run_id(config.query)}.txt"
+        report_content, index_lines = _assemble_report(
+            config.query, pages, failures, quality_stats, since=config.since,
+            search_status=search_status, f3_stats=f3_stats,
+            warnings=run_warnings, extra_notes=extra_notes,
+        )
+        write_error = _write_report_file(report_path, report_content)
+        if write_error:
+            fallback = Path(tempfile.gettempdir()) / "webresearch" / report_path.name
+            write_error = _write_report_file(fallback, report_content)
+            if write_error:
+                print(f"error: could not write the report file: {write_error}",
+                      file=sys.stderr)
+                sys.exit(1)
+            print(f"warning: report directory unwritable — report saved to {fallback}",
+                  file=sys.stderr)
+            report_path = fallback
+        print(_report_line(report_path, index_lines, len(pages), len(failures)))
+        # Redundant path on stderr: harnesses capture both streams.
+        print(f"REPORT: {report_path}", file=sys.stderr)
+        if not pages:
+            print(extra_notes[0], file=sys.stderr)
             sys.exit(1)
 
     except KeyboardInterrupt:
