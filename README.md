@@ -15,7 +15,7 @@ The installer copies `.opencode/` (agents, tools, templates, skills, plugin), `A
 
 ## Default allowance
 
-The shipped `opencode.json` allows all other operations and disables the built-in web search and fetch tools, so all web research goes through `web_search.sh`.
+The shipped `opencode.json` allows all operations by default. Delete or tweak it if you need a different behaviour.
 
 ## How it works
 
