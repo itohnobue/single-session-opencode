@@ -20,7 +20,7 @@ The shipped `opencode.json` allows all operations by default. Delete or tweak it
 ## How it works
 
 - **One session, one worker** — the model reads, writes, runs, and verifies, all in dialog with you. You can interject or redirect at any moment.
-- **Search-first** — when the answer depends on external facts (versions, APIs, docs), the model runs `web_search.sh` instead of guessing; the built-in `websearch`/`webfetch` tools are disabled. Memory-only answers are the exception.
+- **Search-first** — when the answer depends on external facts (versions, APIs, docs), the model searches the web instead of guessing. Memory-only answers are the exception.
 - **Tiered delegation** — big/heavy/context-hungry work goes to subagents in three tiers. Delegation is judgment, not a pipeline:
   - **T1 — plain executor** — task context is the briefing, no research. Use only when the task file carries every fact.
   - **T2 — researched executor** — `prepare-agent` ALWAYS researches the task's technologies into a full research report + compact digest that the executor carries as its briefing (the spawn is mandatory).
