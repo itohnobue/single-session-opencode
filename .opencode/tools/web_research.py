@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["scrapling[fetchers]", "ddgs", "trafilatura", "rank-bm25", "httpx"]
+# dependencies = ["scrapling[fetchers]", "ddgs", "trafilatura", "rank-bm25", "httpx", "feedparser", "pypdf"]
 # ///
 # -*- coding: utf-8 -*-
 """
@@ -57,6 +57,7 @@ import shutil
 import string
 import subprocess
 import sys
+import threading
 import time
 import types
 import urllib.parse
@@ -116,18 +117,55 @@ def _wall_timeout_default() -> int:
 
 WALL_TIMEOUT: int = _wall_timeout_default()
 
-BLOCKED_DOMAINS: Tuple[str, ...] = (
-    "facebook.com", "tiktok.com", "instagram.com", "linkedin.com", "youtube.com",
-    "msn.com",  # redirects to stub/privacy pages, no usable content
-    # Consistently HTTP 403 — wasted fetch slots
-    "forbes.com", "edmunds.com", "cars.com", "nytimes.com",
-    "percona.com", "mctlaw.com", "zenodo.org", "amjmed.com", "dl.acm.org",
-    "nejm.org", "cell.com", "sciencedirect.com", "onlinelibrary.wiley.com",
-    "reddit.com",  # subreddit homepages are empty title-only stubs — no research value
+# ---------------------------------------------------------------------------
+# Domain routing
+#
+# A flat deny list conflated four different problems into one answer. Each
+# domain now names the access path that actually works for it:
+#   block      — drop at intake (login wall, or no usable content)
+#   wayback    — the live page is a paywall teaser; take the archived copy
+#   scholarly  — peer-reviewed full text; resolve by PMCID, DOI or PMID
+#   transcript — reserved for the video-transcript tier (inert today)
+# Matching is exact host or real subdomain, never substring, so `nejm.org`
+# cannot match `notnejm.org`.
+# Set WEB_RESEARCH_ROUTES=off to restore the old flat drop (kill switch).
+# ---------------------------------------------------------------------------
+ROUTE_BLOCK = "block"
+ROUTE_WAYBACK = "wayback"
+ROUTE_SCHOLARLY = "scholarly"
+ROUTE_TRANSCRIPT = "transcript"  # reserved — no fetcher is wired to it yet
+
+_ROUTES_ENABLED = os.environ.get("WEB_RESEARCH_ROUTES", "").strip().lower() != "off"
+
+ROUTES: Tuple[Tuple[str, str], ...] = (
+    # Peer-reviewed / archived full text — resolved via PMCID, DOI or PMID.
+    ("doi.org", ROUTE_SCHOLARLY),
+    ("nejm.org", ROUTE_SCHOLARLY),
+    ("cell.com", ROUTE_SCHOLARLY),
+    ("sciencedirect.com", ROUTE_SCHOLARLY),
+    ("onlinelibrary.wiley.com", ROUTE_SCHOLARLY),
+    ("dl.acm.org", ROUTE_SCHOLARLY),
+    ("amjmed.com", ROUTE_SCHOLARLY),
+    ("zenodo.org", ROUTE_SCHOLARLY),
+    ("europepmc.org", ROUTE_SCHOLARLY),
+    ("pubmed.ncbi.nlm.nih.gov", ROUTE_SCHOLARLY),
+    # Paywalled news: the live fetch returns 200 with a teaser, so the archived
+    # copy is taken on stub/short content as well as on outright failure.
+    ("nytimes.com", ROUTE_WAYBACK),
+    ("forbes.com", ROUTE_WAYBACK),
+    # Login wall or no usable content — still dropped at intake.
+    ("facebook.com", ROUTE_BLOCK),
+    ("tiktok.com", ROUTE_BLOCK),
+    ("instagram.com", ROUTE_BLOCK),
+    ("linkedin.com", ROUTE_BLOCK),
+    ("youtube.com", ROUTE_BLOCK),  # transcript route not wired yet
+    ("msn.com", ROUTE_BLOCK),  # redirects to stub/privacy pages
+    ("percona.com", ROUTE_BLOCK),
+    ("mctlaw.com", ROUTE_BLOCK),
+    ("edmunds.com", ROUTE_BLOCK),
+    ("cars.com", ROUTE_BLOCK),
+    ("reddit.com", ROUTE_BLOCK),  # no zero-config path exists; browser probe rejected
     # twitter.com, x.com: unblocked — FxTwitter API for tweet text
-    # reddit.com: blocked — subreddit pages are empty title-only stubs that give
-    # no research benefit; the substring matcher below covers www./old./np./new.
-    # and all other subdomains automatically
     # medium.com: unblocked — full articles extract cleanly
 )
 
@@ -141,7 +179,7 @@ SKIP_URL_PATTERNS: Tuple[str, ...] = (
     r"finance\.yahoo\.com/",  # EU privacy consent walls
     r"www\.aol\.com/",  # cookie/privacy consent walls
     # tech.yahoo.com: unblocked — returns actual article content
-    # .pdf: now handled via pdftotext extraction
+    # .pdf: handled by the PDF extractor (pdftotext, else the bundled pypdf)
 )
 
 
@@ -165,11 +203,33 @@ BLOCKED_CONTENT_MARKERS: Tuple[str, ...] = (
 # COMPILED REGEX PATTERNS
 # =============================================================================
 
-# URL filtering - single combined pattern for performance
-_BLOCKED_URL_PATTERN = re.compile(
-    r'(?:' + '|'.join(re.escape(d) for d in BLOCKED_DOMAINS) + r')|(?:' + '|'.join(SKIP_URL_PATTERNS) + r')',
+# URL skip patterns (paths/extensions only — domain routing is separate)
+_SKIP_URL_PATTERN = re.compile(
+    r'(?:' + '|'.join(SKIP_URL_PATTERNS) + r')',
     re.IGNORECASE
 )
+
+
+def route_for(url: str) -> str:
+    """Return the access route for a URL's host.
+
+    Matching is exact host or real subdomain, never a substring, so
+    ``nejm.org`` cannot match ``notnejm.org`` or ``nejm.org.evil.test``.
+    Returns "" for an unrouted host (the ordinary fetch path). When routing is
+    disabled (WEB_RESEARCH_ROUTES=off), every routed input degrades to a drop,
+    which reproduces the previous flat deny-list behaviour.
+    """
+    try:
+        host = (urllib.parse.urlparse(url).hostname or "").lower().rstrip(".")
+    except ValueError:
+        return ROUTE_BLOCK
+    if not host:
+        return ROUTE_BLOCK
+    for domain, route in ROUTES:
+        if host == domain or host.endswith("." + domain):
+            return route if _ROUTES_ENABLED else ROUTE_BLOCK
+    return ""
+
 
 # HTML extraction - simple fast patterns (optimized for speed)
 RE_STRIP_TAGS = re.compile(
@@ -465,7 +525,7 @@ class ResearchConfig:
     """Configuration for research workflow."""
     query: str
     fetch_count: int = 20
-    max_content_length: int = 10000
+    max_content_length: int = 20000
     timeout: int = DEFAULT_TIMEOUT
     quiet: bool = False
     min_content_length: int = 600
@@ -486,6 +546,11 @@ class FetchResult:
     title: str = ""
     error: Optional[str] = None
     source: str = "scrapling"
+    # Structured record type: "" for an ordinary page, "feed" for an RSS/Atom
+    # entry list, "hn" for a Hacker News thread. Structured records are
+    # machine-generated, so the F4/F1 boilerplate filters must not treat their
+    # entry headings or comments as page chrome.
+    kind: str = ""
     # Candidate image URLs found on the page (og:image / twitter:image first,
     # then <img> src/data-src/data-original/srcset). Printed as one `[images]`
     # line under the page's `=== <url> ===` header in the full report.
@@ -713,8 +778,15 @@ def clean_text(text: str) -> str:
 
 
 def is_blocked_url(url: str) -> bool:
-    """Check if URL should be blocked (optimized single-regex check)."""
-    return bool(_BLOCKED_URL_PATTERN.search(url))
+    """True when a URL is dropped at intake.
+
+    Two independent reasons: a path/extension skip pattern, or a domain routed
+    to ROUTE_BLOCK. Domains routed to wayback or scholarly are NOT dropped —
+    the fetch dispatcher takes their alternate access path instead.
+    """
+    if _SKIP_URL_PATTERN.search(url):
+        return True
+    return route_for(url) == ROUTE_BLOCK
 
 
 def is_valid_url(url: str) -> bool:
@@ -1359,8 +1431,13 @@ def _is_pdf(raw: str, url: str) -> bool:
     return "%PDF" in raw[:50]
 
 
-def _extract_pdf(raw_bytes: bytes) -> str:
-    """Extract text from PDF using pdftotext (poppler). Writes to temp file since pdftotext needs seekable input."""
+PDF_MIN_GOOD_CHARS = 600  # below this, pdftotext output is treated as unusable
+PDF_PYPDF_MAX_PAGES = 400  # safety bound for the pure-Python fallback
+PDF_MAX_DOWNLOAD_BYTES = 25 * 1024 * 1024  # papers routinely exceed MAX_CONTENT_BYTES
+
+
+def _extract_pdf_pdftotext(raw_bytes: bytes) -> str:
+    """pdftotext (poppler). Writes to a temp file since it needs seekable input."""
     if not PDFTOTEXT_PATH:
         return ""
     import tempfile
@@ -1388,6 +1465,52 @@ def _extract_pdf(raw_bytes: bytes) -> str:
             except OSError:
                 pass
     return ""
+
+
+def _extract_pdf_pypdf(raw_bytes: bytes) -> str:
+    """Pure-Python PDF text extraction (pypdf).
+
+    Fallback for machines without poppler, and for PDFs where pdftotext
+    returned nothing. Handles text PDFs only — scanned pages need OCR, which
+    this tool does not do; they yield an empty string and are reported as such.
+    """
+    try:
+        from io import BytesIO
+
+        from pypdf import PdfReader
+    except Exception:
+        return ""
+    try:
+        reader = PdfReader(BytesIO(raw_bytes))
+        if getattr(reader, "is_encrypted", False):
+            try:
+                reader.decrypt("")
+            except Exception:
+                return ""
+        pages: List[str] = []
+        for page in reader.pages[:PDF_PYPDF_MAX_PAGES]:
+            try:
+                text = page.extract_text() or ""
+            except Exception:
+                continue
+            if text.strip():
+                pages.append(text.strip())
+        return "\n\n".join(pages).strip()
+    except Exception:
+        return ""
+
+
+def _extract_pdf(raw_bytes: bytes) -> str:
+    """Extract text from a PDF: pdftotext first, pypdf when that is absent or short.
+
+    Keeps the better of the two results, so a machine with poppler behaves
+    exactly as before and a machine without it no longer silently loses the page.
+    """
+    primary = _extract_pdf_pdftotext(raw_bytes)
+    if primary and len(primary) >= PDF_MIN_GOOD_CHARS:
+        return primary
+    fallback = _extract_pdf_pypdf(raw_bytes)
+    return fallback if len(fallback) > len(primary) else primary
 
 
 def _extract_content(raw_html: str) -> Tuple[str, str]:
@@ -1644,6 +1767,26 @@ def _fetch_github_readme(owner: str, repo: str, max_length: int) -> Optional[str
         pass
     return None
 
+ARXIV_PDF_MAX_CHARS = 60000
+
+
+def _fetch_arxiv_pdf_fulltext(paper_id: str) -> str:
+    """Full text of an arXiv paper via its PDF; "" when unavailable.
+
+    Runs in the same worker thread as the Atom API call. Fail-soft by design:
+    a missing or unparseable PDF never costs the abstract.
+    """
+    pdf_bytes = _http_get_bytes(
+        f"https://arxiv.org/pdf/{paper_id}", timeout=12, max_bytes=PDF_MAX_DOWNLOAD_BYTES
+    )
+    if not pdf_bytes or b"%PDF" not in pdf_bytes[:64]:
+        return ""
+    text = _extract_pdf(pdf_bytes)
+    if len(text) < 400:
+        return ""
+    return text[:ARXIV_PDF_MAX_CHARS]
+
+
 def _fetch_arxiv_api(paper_id: str, max_length: int) -> Optional[str]:
     """Fetch ArXiv paper metadata + abstract via Atom API."""
     import urllib.request
@@ -1672,6 +1815,12 @@ def _fetch_arxiv_api(paper_id: str, max_length: int) -> Optional[str]:
         if categories:
             parts.append(f"Categories: {', '.join(categories[:5])}")
         parts.append(f"\n## Abstract\n\n{abstract}")
+
+        # The abstract alone is a stub. Append the paper's full text so a --sci
+        # hit is evidence, not a teaser. Fail-soft: the abstract still stands.
+        full_text = _fetch_arxiv_pdf_fulltext(paper_id)
+        if full_text:
+            parts.append(f"\n## Full text\n\n{full_text}")
 
         text = "\n".join(parts)
         return text[:max_length] if text else None
@@ -1769,6 +1918,315 @@ def _fetch_wayback_fallback(url: str, max_length: int) -> Optional[str]:
     except Exception:
         pass
     return None
+
+
+# --------------------------------------------------- scholarly / feed / HN access
+RE_DOI_IN_URL = re.compile(r'10\.\d{4,9}/[^\s"\'<>&?#]+')
+RE_PMCID_IN_URL = re.compile(r'/(?:article|articles)/(?:PMC/)?(PMC\d+)', re.IGNORECASE)
+RE_PMID_IN_URL = re.compile(
+    r'(?:pubmed\.ncbi\.nlm\.nih\.gov/|/article/MED/)(\d+)', re.IGNORECASE
+)
+RE_HN_ITEM_URL = re.compile(r'https?://news\.ycombinator\.com/item\?id=(\d+)')
+RE_XML_BLOCK_END = re.compile(
+    r'</(?:p|sec|title|abstract|caption|list-item|ref|table-wrap|fig|'
+    r'article-title|journal-title|contrib|aff|journal-meta|article-meta|pub-date)>',
+    re.IGNORECASE,
+)
+
+# Scholarly resolution is throttled: each miss can cost four upstream calls, and
+# the fetch consumer runs up to 50 pages concurrently against free public APIs.
+SCHOLARLY_MAX_PER_RUN = 10
+SCHOLARLY_CONCURRENCY = 3
+_scholarly_sem = threading.BoundedSemaphore(SCHOLARLY_CONCURRENCY)
+_scholarly_used = 0
+_scholarly_lock = threading.Lock()
+
+FEED_MAX_ENTRIES = 50
+FEED_SUMMARY_CHARS = 300
+HN_THREADS_PER_QUERY = 2
+HN_THREAD_MIN_COMMENTS = 5
+HN_MAX_COMMENTS = 40
+HN_MAX_DEPTH = 3
+
+
+def _reset_scholarly_budget() -> None:
+    """Reset the per-run scholarly resolution budget (called once per run)."""
+    global _scholarly_used
+    with _scholarly_lock:
+        _scholarly_used = 0
+
+
+def _scholarly_budget_take() -> bool:
+    """Claim one scholarly resolution slot for this run."""
+    global _scholarly_used
+    with _scholarly_lock:
+        if _scholarly_used >= SCHOLARLY_MAX_PER_RUN:
+            return False
+        _scholarly_used += 1
+        return True
+
+
+def _http_get_bytes(url: str, timeout: int = 5, max_bytes: int = MAX_CONTENT_BYTES) -> Optional[bytes]:
+    """GET a URL with a UA header and a byte cap. Fail-soft: None on any error."""
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "web-research-tool/1.0"})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.read(max_bytes + 1)
+    except Exception:
+        return None
+
+
+def _markup_to_text(markup: str) -> str:
+    """Strip tags from an XML/HTML fragment while keeping paragraph breaks."""
+    if not markup:
+        return ""
+    markup = RE_BR.sub("\n", markup)
+    markup = RE_XML_BLOCK_END.sub("\n\n", markup)
+    markup = RE_ALL_TAGS.sub("", markup)
+    markup = unescape(markup)
+    markup = RE_SPACES.sub(" ", markup)
+    return RE_MULTI_NEWLINE.sub("\n\n", markup).strip()
+
+
+def _pmcid_from_url(url: str) -> Optional[str]:
+    match = RE_PMCID_IN_URL.search(url)
+    return match.group(1).upper() if match else None
+
+
+def _pmid_from_url(url: str) -> Optional[str]:
+    match = RE_PMID_IN_URL.search(url)
+    return match.group(1) if match else None
+
+
+def _doi_from_url(url: str) -> Optional[str]:
+    match = RE_DOI_IN_URL.search(urllib.parse.unquote(url))
+    if not match:
+        return None
+    doi = match.group(0).rstrip(".,;:)]}\"'")
+    return doi or None
+
+
+def _europepmc_pmcid(query: str) -> Optional[str]:
+    """Look up a PMCID in Europe PMC by an exact query (DOI / EXT_ID)."""
+    encoded = urllib.parse.quote(query, safe="")
+    raw = _http_get_bytes(
+        "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
+        f"?query={encoded}&format=json&pageSize=1&resultType=core",
+        timeout=6,
+    )
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw.decode("utf-8", errors="replace"))
+        results = (data.get("resultList") or {}).get("result") or []
+        pmcid = results[0].get("pmcid") if results else None
+        return pmcid.upper() if pmcid else None
+    except Exception:
+        return None
+
+
+def _fetch_europepmc_xml(pmcid: str, max_length: int) -> Optional[str]:
+    """Fetch clean full text from Europe PMC's JATS XML endpoint."""
+    xml_url = f"https://www.ebi.ac.uk/europepmc/webservices/rest/{pmcid}/fullTextXML"
+    raw = _http_get_bytes(xml_url, timeout=10)
+    if not raw:
+        return None
+    xml = raw.decode("utf-8", errors="replace")
+    title_match = re.search(r'<article-title[^>]*>(.*?)</article-title>', xml, re.S | re.I)
+    title = _markup_to_text(title_match.group(1)) if title_match else ""
+    body = _markup_to_text(xml)
+    if len(body) < 400:
+        return None
+    header = f"# {title or f'Europe PMC {pmcid}'}\n\nSource: {xml_url}\n\n"
+    return (header + body)[:max_length]
+
+
+def _fetch_openalex_oa_pdf(doi: str, max_length: int) -> Optional[str]:
+    """Resolve an open-access PDF for a DOI through OpenAlex, then extract it."""
+    work_url = "https://api.openalex.org/works/https://doi.org/" + urllib.parse.quote(doi, safe="/")
+    raw = _http_get_bytes(work_url, timeout=6)
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw.decode("utf-8", errors="replace"))
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    pdf_url = (data.get("best_oa_location") or {}).get("pdf_url") or (
+        data.get("open_access") or {}
+    ).get("oa_url")
+    if not pdf_url:
+        return None
+    pdf_bytes = _http_get_bytes(pdf_url, timeout=12, max_bytes=PDF_MAX_DOWNLOAD_BYTES)
+    if not pdf_bytes or b"%PDF" not in pdf_bytes[:64]:
+        return None
+    text = _extract_pdf(pdf_bytes)
+    if len(text) < 400:
+        return None
+    title = " ".join((data.get("title") or "").split()) or f"OpenAlex OA copy ({doi})"
+    return (f"# {title}\n\nSource: {pdf_url}\n\n{text}")[:max_length]
+
+
+def _fetch_scholarly_fulltext(url: str, max_length: int) -> Optional[str]:
+    """Resolve an open-access full text for a scholarly URL.
+
+    Order: PMCID in the URL → Europe PMC by DOI → OpenAlex OA PDF → Europe PMC
+    by PMID. Fail-soft: None means no OA copy was found, and the caller falls
+    back to the ordinary fetch (publisher landing page, then Wayback).
+    """
+    with _scholarly_sem:
+        pmcid = _pmcid_from_url(url)
+        if pmcid:
+            text = _fetch_europepmc_xml(pmcid, max_length)
+            if text:
+                return text
+        doi = _doi_from_url(url)
+        if doi:
+            pmcid = _europepmc_pmcid(f'DOI:"{doi}"')
+            if pmcid:
+                text = _fetch_europepmc_xml(pmcid, max_length)
+                if text:
+                    return text
+            text = _fetch_openalex_oa_pdf(doi, max_length)
+            if text:
+                return text
+        pmid = _pmid_from_url(url)
+        if pmid:
+            pmcid = _europepmc_pmcid(f"EXT_ID:{pmid} AND SRC:MED")
+            if pmcid:
+                text = _fetch_europepmc_xml(pmcid, max_length)
+                if text:
+                    return text
+    return None
+
+
+def _looks_like_feed(payload) -> bool:
+    """Cheap structural sniff for RSS/Atom; never trusts the content type alone."""
+    if isinstance(payload, (bytes, bytearray)):
+        head = bytes(payload[:4096]).decode("utf-8", errors="replace")
+    else:
+        head = str(payload or "")[:4096]
+    head = head.lstrip("\ufeff \t\r\n").lower()
+    if not head.startswith(("<?xml", "<rss", "<feed", "<rdf:rdf")):
+        return False
+    return any(marker in head for marker in ("<rss", "<feed", "<rdf:rdf"))
+
+
+def _feed_entry_date(entry) -> str:
+    """Publication date as YYYY-MM-DD, or "" when the feed does not carry one."""
+    for key in ("published_parsed", "updated_parsed"):
+        parsed = entry.get(key)
+        if parsed:
+            try:
+                return time.strftime("%Y-%m-%d", parsed)
+            except (TypeError, ValueError):
+                continue
+    return ""
+
+
+def _feed_entry_summary(entry) -> str:
+    """Plain-text summary from content:encoded when present, else summary."""
+    raw = ""
+    content = entry.get("content")
+    if isinstance(content, list) and content and isinstance(content[0], dict):
+        raw = content[0].get("value") or ""
+    if not raw:
+        raw = entry.get("summary") or entry.get("description") or ""
+    if not raw:
+        return ""
+    raw = RE_BR.sub(" ", raw)
+    raw = RE_ALL_TAGS.sub("", raw)
+    raw = unescape(raw)
+    raw = RE_WHITESPACE.sub(" ", raw).strip()
+    return raw[:FEED_SUMMARY_CHARS]
+
+
+def _render_feed(payload: bytes, url: str, max_chars: int) -> Optional[str]:
+    """Render an RSS/Atom payload as ONE structured record.
+
+    Structure is the point: the old path reached the entries only by accident,
+    losing every entry URL. One record per feed keeps the request count at one
+    and preserves the links a follow-up fetch needs.
+    """
+    try:
+        import feedparser
+    except Exception:
+        return None
+    try:
+        parsed = feedparser.parse(payload)
+    except Exception:
+        return None
+    entries = list(getattr(parsed, "entries", None) or [])
+    feed_title = " ".join((parsed.feed.get("title") or "").split())
+    if not feed_title and not entries:
+        return None
+    parts = [
+        f"# {feed_title or url}",
+        "",
+        f"Feed: {url}",
+        f"Entries: {len(entries)} (newest first)",
+        "",
+    ]
+    used = sum(len(part) + 1 for part in parts)
+    shown = 0
+    for entry in entries[:FEED_MAX_ENTRIES]:
+        title = " ".join((entry.get("title") or "").split()) or "(untitled)"
+        link = (entry.get("link") or "").strip()
+        date = _feed_entry_date(entry)
+        summary = _feed_entry_summary(entry)
+        block = [f"## {date + ' — ' if date else ''}{title}"]
+        if link:
+            block.append(f"URL: {link}")
+        if summary:
+            block.append(summary)
+        block.append("")
+        chunk = "\n".join(block)
+        if used + len(chunk) > max_chars:
+            parts.append(f"[feed truncated: {shown} of {len(entries)} entries shown]")
+            break
+        parts.append(chunk)
+        used += len(chunk)
+        shown += 1
+    return "\n".join(parts).strip()
+
+
+def _fetch_hn_thread(item_id: str, max_length: int) -> Optional[str]:
+    """Render a Hacker News discussion as one record (Algolia item API)."""
+    raw = _http_get_bytes(f"https://hn.algolia.com/api/v1/items/{item_id}", timeout=6)
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw.decode("utf-8", errors="replace"))
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    title = " ".join((data.get("title") or "").split()) or f"Hacker News item {item_id}"
+    parts = [f"# {title}", "", f"Points: {data.get('points') or 0}", ""]
+    count = 0
+
+    def walk(node: dict, depth: int) -> None:
+        nonlocal count
+        if count >= HN_MAX_COMMENTS or depth > HN_MAX_DEPTH:
+            return
+        for child in node.get("children") or []:
+            if count >= HN_MAX_COMMENTS:
+                return
+            if not isinstance(child, dict):
+                continue
+            body = _markup_to_text(child.get("text") or "")
+            if body:
+                author = child.get("author") or "unknown"
+                parts.append(f"[d{depth}] {author}: {body[:600]}")
+                count += 1
+            walk(child, depth + 1)
+
+    walk(data, 1)
+    if count == 0:
+        return None
+    joined = "\n".join(parts)
+    return joined[:max_length]
 
 
 # ---------------------------------------------------------------- browser tier
@@ -2021,11 +2479,19 @@ async def fetch_single_async(
             api_content = await loop.run_in_executor(
                 None, _fetch_twitter_api, screen_name, tweet_id, max_content_length
             )
+        # Hacker News discussion: structured thread instead of a page scrape.
+        hn_match = RE_HN_ITEM_URL.match(url) if not api_content else None
+        if hn_match:
+            api_content = await loop.run_in_executor(
+                None, _fetch_hn_thread, hn_match.group(1), max_content_length
+            )
         # For API-routed domains, if API failed, scraping won't help — bail early
         api_only = tw_match
         if api_content:
             elapsed = time.monotonic() - t0
             result = _create_fetch_result(url, api_content, min_content_length, max_content_length, query=query, apply_filters=apply_filters)
+            if hn_match:
+                result.kind = "hn"
             if wiki_image:
                 result.images = [wiki_image]
             if progress:
@@ -2037,6 +2503,24 @@ async def fetch_single_async(
             if progress:
                 progress.url_result(url, False, elapsed, "API failed")
             return result
+        # Domain routing: scholarly sources take an open-access resolution path
+        # before the ordinary static fetch. Budgeted per run; on a miss (or an
+        # exhausted budget) the static path below runs unchanged.
+        route = route_for(url)
+        if route == ROUTE_SCHOLARLY and _scholarly_budget_take():
+            scholarly = await loop.run_in_executor(
+                None, _fetch_scholarly_fulltext, url, max_content_length
+            )
+            if scholarly:
+                result = _create_fetch_result(
+                    url, scholarly, min_content_length, max_content_length,
+                    query=query, apply_filters=apply_filters,
+                )
+                if result.success:
+                    elapsed = time.monotonic() - t0
+                    if progress:
+                        progress.url_result(url, True, elapsed, "")
+                    return result
         _host = urllib.parse.urlparse(url).hostname or ""
         _use_httpx = _host in _CURL_DNS_FAIL_DOMAINS
         # Shared budget across the static attempt AND the httpx fallback: the
@@ -2102,20 +2586,47 @@ async def fetch_single_async(
             raw_html = raw_html[:MAX_CONTENT_BYTES]
 
         if _is_pdf(raw_html, url):
-            # PDF: extract via pdftotext in process pool
-            raw_body = page.body if isinstance(page.body, bytes) else raw_html.encode("utf-8", errors="replace")
+            # PDF: pdftotext when available, pypdf otherwise (both in process pool)
+            raw_body = page.body if isinstance(page.body, (bytes, bytearray)) else raw_html.encode("utf-8", errors="replace")
             loop = asyncio.get_running_loop()
             content = await loop.run_in_executor(
                 _get_extract_pool(), _extract_pdf, raw_body
             )
             if not content:
+                _pdf_err = "PDF extraction failed (no text layer or encrypted)"
                 if progress:
-                    progress.url_result(url, False, elapsed, "PDF extraction failed")
-                return FetchResult(url=url, success=False, error="PDF extraction failed")
+                    progress.url_result(url, False, elapsed, _pdf_err)
+                return FetchResult(url=url, success=False, error=_pdf_err)
             result = _create_fetch_result(url, content, min_content_length, max_content_length, query=query, apply_filters=apply_filters)
             if progress:
                 progress.url_result(url, result.success, elapsed, result.error or "")
             return result
+
+        # RSS/Atom: render structured entries instead of tag-stripped text.
+        # Runs in both modes; the record keeps entry URLs, which extraction loses.
+        feed_payload = (
+            page.body if isinstance(getattr(page, "body", None), (bytes, bytearray))
+            else raw_html.encode("utf-8", errors="replace")
+        )
+        if _looks_like_feed(feed_payload):
+            # --url mode normalises an absent cap to 10**12; keep the feed record
+            # bounded by entries either way instead of inheriting that sentinel.
+            feed_budget = (
+                40000 if max_content_length > 10**11
+                else max(9000, max_content_length - 1000)
+            )
+            feed_text = await asyncio.get_running_loop().run_in_executor(
+                None, _render_feed, bytes(feed_payload), url, feed_budget
+            )
+            if feed_text:
+                result = _create_fetch_result(
+                    url, feed_text, min_content_length, max_content_length,
+                    query=query, apply_filters=apply_filters,
+                )
+                result.kind = "feed"
+                if progress:
+                    progress.url_result(url, result.success, elapsed, result.error or "")
+                return result
 
         if is_blocked_content(raw_html):
             return await _maybe_escalate(
@@ -2159,13 +2670,26 @@ async def fetch_single_async(
             content = structured + content
 
         result = _create_fetch_result(url, content, min_content_length, max_content_length, query=query, apply_filters=apply_filters)
-        # Wayback Machine fallback for failed/paywalled content
-        if not result.success:
+        # Wayback Machine fallback. Ordinary pages use it on failure only. For a
+        # WAYBACK-route domain (paywalled news) the live fetch returns 200 with a
+        # teaser, which is a "success" — so a stub or short body also triggers it.
+        _wb_needed = not result.success
+        if not _wb_needed and route == ROUTE_WAYBACK:
+            _wb_needed = (
+                not result.content
+                or _is_stub_page(result.content)
+                or len(result.content) < 3 * min_content_length
+            )
+        if _wb_needed:
             wb_content = await loop.run_in_executor(
                 None, _fetch_wayback_fallback, url, max_content_length
             )
             if wb_content:
-                result = _create_fetch_result(url, wb_content, min_content_length, max_content_length, query=query, apply_filters=apply_filters)
+                wb_result = _create_fetch_result(url, wb_content, min_content_length, max_content_length, query=query, apply_filters=apply_filters)
+                if wb_result.success and (
+                    not result.success or len(wb_result.content) > len(result.content)
+                ):
+                    result = wb_result
         result.images = images
         # Escalation ladder: retry-worthy failures (HTTP 403/429/5xx, CAPTCHA,
         # Timeout, Too short) get one retry with real Google Chrome (the same tier
@@ -2504,15 +3028,17 @@ async def run_research_async(
                     with urllib.request.urlopen(req, timeout=3) as resp:
                         data = json.loads(resp.read().decode("utf-8", errors="replace"))
                     for result in (data.get("resultList", {}).get("result") or []):
-                        # Prefer full-text URL, then DOI, then Europe PMC page
+                        # PMCID first: the scholarly route turns it into clean
+                        # full text. A DOI resolves into the publisher wall this
+                        # source exists to bypass, so it is the fallback.
                         url = None
-                        doi = result.get("doi")
-                        if doi:
-                            url = f"https://doi.org/{doi}"
+                        pmcid = result.get("pmcid")
+                        if pmcid:
+                            url = f"https://europepmc.org/article/PMC/{pmcid}"
                         if not url:
-                            pmcid = result.get("pmcid")
-                            if pmcid:
-                                url = f"https://europepmc.org/article/PMC/{pmcid}"
+                            doi = result.get("doi")
+                            if doi:
+                                url = f"https://doi.org/{doi}"
                             else:
                                 pmid = result.get("pmid")
                                 if pmid:
@@ -2536,13 +3062,27 @@ async def run_research_async(
                     req = urllib.request.Request(api_url, headers={"User-Agent": "web-research-tool/1.0"})
                     with urllib.request.urlopen(req, timeout=3) as resp:
                         data = json.loads(resp.read().decode("utf-8", errors="replace"))
+                    threads_added = 0
                     for hit in (data.get("hits") or []):
+                        story_id = hit.get("objectID")
                         url = hit.get("url")
                         if url:
                             _enqueue_bonus(url, "hackernews")
+                            # The discussion is where an article gets corrected.
+                            # Bounded: two threads per query and enough comments
+                            # to be worth a page, so the 20-page budget holds.
+                            if (
+                                story_id
+                                and threads_added < HN_THREADS_PER_QUERY
+                                and (hit.get("num_comments") or 0) >= HN_THREAD_MIN_COMMENTS
+                            ):
+                                _enqueue_bonus(
+                                    f"https://news.ycombinator.com/item?id={story_id}",
+                                    "hackernews-comments",
+                                )
+                                threads_added += 1
                         else:
                             # Ask HN / Show HN posts without external URL — link to HN discussion
-                            story_id = hit.get("objectID")
                             if story_id:
                                 _enqueue_bonus(f"https://news.ycombinator.com/item?id={story_id}", "hackernews")
                 except Exception:
@@ -2795,6 +3335,7 @@ def _dedup_results(
             content=new_content,
             title=r.title,
             source=r.source,
+            kind=r.kind,
             images=r.images,
         ))
 
@@ -2911,7 +3452,7 @@ def _dedup_cross_page_sentences(
             continue
         out.append(FetchResult(
             url=r.url, success=True, content=new_content,
-            title=r.title, source=r.source,
+            title=r.title, source=r.source, kind=r.kind,
             images=r.images,
         ))
 
@@ -3175,7 +3716,12 @@ def _drop_stub_pages(
     try:
         if not QUALITY_FILTERS_ENABLED:
             return results, stats
-        drop_ids = {id(r) for r in results if r.success and _is_stub_page(r.content)}
+        drop_ids = {
+            id(r) for r in results
+            # A structured feed record is machine-generated, not page chrome:
+            # a one-entry feed is thin but still content.
+            if r.success and r.kind != "feed" and _is_stub_page(r.content)
+        }
         if not drop_ids:
             return results, stats
         stats["stub_dropped"] = len(drop_ids)
@@ -3458,7 +4004,10 @@ def _prepare_report_pages(results: List[FetchResult]) -> List[Tuple[FetchResult,
     for r in results:
         if not r.success:
             continue
-        text = _filter_page_text(r.content)
+        # Structured records (feed entry lists, HN threads) are already clean:
+        # F4 would read entry titles as section headings and drop entries whose
+        # title or summary contains a word like "comments" or "read more".
+        text = r.content if r.kind in ("feed", "hn") else _filter_page_text(r.content)
         if not text:
             continue
         truncated = len(text) > REPORT_PAGE_CEILING
@@ -3634,6 +4183,7 @@ def _write_report_file(path: Path, content: str) -> bool:
 
 def run_research(config: ResearchConfig) -> Optional[List[FetchResult]]:
     """Execute research and output results."""
+    _reset_scholarly_budget()
     progress = ProgressReporter(quiet=config.quiet)
 
     # Batch mode: collect all results, then format
@@ -3688,7 +4238,9 @@ Search: DuckDuckGo (static, no API key)
 Fetch: Scrapling AsyncFetcher (TLS fingerprinting); failed or gated fetches are retried with real Google Chrome (the --url-chrome tier, provisioned into tmp/browser/chrome)
 Extract: trafilatura > regex > Scrapling DOM parser (tiered fallback)
 Full page saved to tmp/webresearch/, path printed to stdout
-Blocked domains: facebook.com, tiktok.com, instagram.com, linkedin.com, youtube.com, msn.com, forbes.com, edmunds.com, cars.com, nytimes.com, percona.com, mctlaw.com, zenodo.org, amjmed.com, dl.acm.org, nejm.org, cell.com, sciencedirect.com, onlinelibrary.wiley.com, reddit.com
+Blocked domains: facebook.com, tiktok.com, instagram.com, linkedin.com, youtube.com, msn.com, percona.com, mctlaw.com, edmunds.com, cars.com, reddit.com
+Routed access: scholarly publishers and doi.org resolve to open-access full text; nytimes.com and forbes.com fall back to the Wayback copy
+Structured sources: RSS/Atom feeds, Hacker News threads, arXiv full text, PDFs (pdftotext or the bundled pypdf extractor)
         """
     )
 
@@ -3744,6 +4296,7 @@ Blocked domains: facebook.com, tiktok.com, instagram.com, linkedin.com, youtube.
 
         global _BROWSER_ESCALATIONS
         _BROWSER_ESCALATIONS = 0
+        _reset_scholarly_budget()
         progress = ProgressReporter()
 
         async def _fetch_url_single(u: str) -> FetchResult:
