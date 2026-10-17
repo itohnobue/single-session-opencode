@@ -2559,10 +2559,7 @@ async def _maybe_escalate(
         # caller reports, not just in the progress line.
         result.error = deepseek_failure
     if progress:
-        progress.url_result(
-            url, result.success, elapsed,
-            deepseek_failure or (result.error or ""),
-        )
+        progress.url_result(url, result.success, elapsed, result.error or "")
     return result
 
 
