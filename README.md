@@ -1,6 +1,6 @@
 # Single-Session OpenCode
 
-A single-session agent suite for [OpenCode](https://opencode.ai) (v1 & v2): the model does the work itself in dialog with you, and calls in specialized subagents when the work is big or context-heavy. No orchestration pipeline. Works with any LLM provider.
+A single-session agent suite for [OpenCode](https://opencode.ai) (v1 & v2): the model does the work itself in dialog with you, and calls in specialized subagents when the work is big or context-heavy. Works with any LLM provider.
 
 ## Quick Start
 
@@ -15,17 +15,7 @@ The installer copies `.opencode/` (agents, tools, templates, skills, plugin), `A
 
 ## Default allowance
 
-The shipped `opencode.json` allows all other operations (V1 shorthand `"permission": "allow"`, which V2 normalizes) and hard-disables the built-in web search/fetch tools on both versions — V1 via `"tools": { "websearch": false, "webfetch": false }`, V2 via `"websearch": false` plus a `permissions` deny; all web research goes through `web_search.sh`. It pins **no model**: the model and provider come from your machine's global OpenCode config (`~/.config/opencode/opencode.json`). Edit the project `opencode.json` for a per-machine override. Reasoning effort is configured in the global config (agents do not pin their own).
-
-## Optional: DeepSeek search
-
-`web_search.sh` can also query DeepSeek's in-house search index alongside DuckDuckGo — 20 extra pages per query, or 40 when DuckDuckGo is unavailable. Results land in the same report. Off by default; enable it in your shell:
-
-```bash
-export WEB_RESEARCH_DEEPSEEK=1
-```
-
-The API key is read from `provider.deepseek.options.apiKey` in `~/.config/opencode/opencode.json` (the config OpenCode already uses); `DEEPSEEK_API_KEY` overrides it. Without a key the run continues on DuckDuckGo with one warning. Billing: $0.75 per 1,000 successful requests, one request per query.
+The shipped `opencode.json` allows all other operations and disables the built-in web search and fetch tools, so all web research goes through `web_search.sh`.
 
 ## How it works
 
@@ -37,6 +27,16 @@ The API key is read from `provider.deepseek.options.apiKey` in `~/.config/openco
   - **T3 — full workflow** — for any complex issue, always researched (mandatory prepare at issue start): review agents gather research + discovery + review → research-backed second opinion at MEDIUM+ → adversarial verification → fixes.
 - **Continuation handoff** — a fixed 8-section carry-over so a fresh agent or later session resumes without re-discovery: R3 run retirement uses it automatically, and `/handoff` checkpoints a session on demand.
 - **Memory that survives** — two-tier knowledge/session memory via `memory.sh`.
+
+### Optional: DeepSeek search
+
+`web_search.sh` can also query DeepSeek's in-house search index alongside DuckDuckGo — 20 extra pages per query, or 40 when DuckDuckGo is unavailable. Results land in the same report. Off by default; enable it in your shell:
+
+```bash
+export WEB_RESEARCH_DEEPSEEK=1
+```
+
+The API key is read from `provider.deepseek.options.apiKey` in `~/.config/opencode/opencode.json` (the config OpenCode already uses); `DEEPSEEK_API_KEY` overrides it.
 
 ## The 8 agents
 
