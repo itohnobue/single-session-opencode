@@ -20,6 +20,7 @@ You are the postfix-reviewer — the post-fix review agent. Your ONLY job: verif
 The task file carries: the original fix design (the review report / finding that defined the fix) and the applied change (diff or changed files). Verify:
 
 1. **Correctness** — does the applied diff actually implement the designed fix? Does it address the root cause the design targeted? Quote the diff lines against the design.
+   **Witness check:** the fix report MUST carry a fix witness (pre/post reproduction, revert test, or `witness: not run — <why>`). Verify the witness exists and is consistent with the applied diff. Re-run the named command only when it is cheap and parallel-safe; otherwise verify the pasted output against the diff. A fix with neither a witness nor a stated reason is NEEDS-FIX.
 2. **Minimality** — every changed line must trace to the fix design. Flag scope-creep edits (reformats, unrelated refactors, drive-by changes).
 3. **New bugs** — did the fix introduce regressions elsewhere? Check callers/callees of every changed function; check the exact cases the design mentioned.
 4. **Test breakage** — grep affected tests; verify test expectations still hold (report without running the full suite).

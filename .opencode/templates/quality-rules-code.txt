@@ -23,6 +23,11 @@ Mandatory test verification (skip = report auto-rejected by the main model):
 - If test command is unavailable or fails to run: write "TESTS NOT RUN: [reason]"
 - If some tests fail: list each failure with file:line and error message
 
+FIX WITNESS (when this run implements a reviewed fix):
+- Before editing, reproduce the original failure with the smallest targeted check; after the fix, re-run the same check. Paste both commands and their actual outputs — a described mechanism is not a witness.
+- If no reproduction is possible, name a test that goes red when the fix is reverted and passes with it, or write `witness: not run — <why no reproduction is possible>`.
+- For a static finding (a missing guard, a wrong predicate), the cited file:line is evidence of the defect but NOT a fix witness — state the witness form used or why none exists.
+
 Check discipline (MANDATORY):
 - A check counts as passed only if you ran it during THIS task. Otherwise report it as not run.
 - Run the check the task names, at the scale it names. A narrower or faster substitute (one test file for the suite, a build instead of the tests) is reported as what it is — never as the named check — with the exact command you ran.
