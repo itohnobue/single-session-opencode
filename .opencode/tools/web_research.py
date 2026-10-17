@@ -132,6 +132,11 @@ logger.propagate = False
 # Fetch timeout for single-page fetches (seconds)
 DEFAULT_TIMEOUT: int = 5
 
+# --url is a deliberate fetch ("get this page the hard way"): one page, often a
+# large PDF or a slow peer. It gets a generous per-attempt budget, not the
+# search-mode 5s cutoff; the whole run is still bounded by WALL_TIMEOUT.
+URL_FETCH_TIMEOUT: int = 120
+
 # Whole-run wall-clock timeout (seconds). Bounds the entire research run on ALL
 # platforms: search mode wraps the async core in asyncio.wait_for (Windows has
 # no SIGALRM), and the Unix SIGALRM watchdog covers the post-processing phase
@@ -1551,6 +1556,28 @@ def _is_pdf(raw: str, url: str) -> bool:
     return "%PDF" in raw[:50]
 
 
+def _is_pdf_url(url: str) -> bool:
+    """True when a search result is a PDF link that should be listed, not fetched.
+
+    Search mode records PDF URLs in the report's PDF LINKS block instead of
+    downloading them: one PDF costs tens of seconds to transfer and extract,
+    and the model can fetch it deliberately with `--url` when it matters.
+    Exempt: arXiv (the API fast path serves the paper without the PDF) and
+    scholarly-routed hosts (their resolver already handles open-access PDFs
+    under its own budget).
+    """
+    try:
+        parts = urllib.parse.urlparse(url)
+        host = (parts.hostname or "").lower().rstrip(".")
+    except Exception:
+        return False
+    if host == "arxiv.org" or host.endswith(".arxiv.org"):
+        return False
+    if route_for(url) == ROUTE_SCHOLARLY:
+        return False
+    return (parts.path or "").lower().rstrip("/").endswith(".pdf")
+
+
 PDF_MIN_GOOD_CHARS = 600  # below this, pdftotext output is treated as unusable
 PDF_PYPDF_MAX_PAGES = 400  # safety bound for the pure-Python fallback
 PDF_MAX_DOWNLOAD_BYTES = 25 * 1024 * 1024  # papers routinely exceed MAX_CONTENT_BYTES
@@ -2574,6 +2601,7 @@ async def fetch_single_async(
     render: str = "off",
     apply_filters: bool = True,
     deepseek: bool = False,
+    hard_cap: Optional[float] = None,
 ) -> FetchResult:
     """Fetch single URL using Scrapling's AsyncFetcher (TLS fingerprinting).
 
@@ -2585,6 +2613,9 @@ async def fetch_single_async(
     apply_filters: False = raw mode (--url default): full-document DOM
     extraction (no content-area detection) and no F4/F1 cleanup — every
     visible text node in page order. True = the default filtered path.
+    hard_cap: wall budget for the static transfer. None = the search-mode
+    cutoff (min(timeout, 5)); --url passes its own generous budget so a
+    deliberate fetch of a large file is not cut short.
     """
     # The --url full mode passes max_content_length=None (no cap). _create_fetch_result
     # would crash on `len(content) > None`, so a sentinel huge value disables
@@ -2696,7 +2727,7 @@ async def fetch_single_async(
             try:
                 page = await asyncio.wait_for(
                     AsyncFetcher.get(url, timeout=timeout, stealthy_headers=True),
-                    timeout=min(timeout, 5),  # hard cutoff — DNS should resolve in <1s
+                    timeout=hard_cap if hard_cap is not None else min(timeout, 5),
                 )
             except (asyncio.TimeoutError, Exception) as _fetch_err:
                 if isinstance(_fetch_err, asyncio.TimeoutError) or "Resolving timed out" in str(_fetch_err):
@@ -3052,7 +3083,12 @@ class MultiSearch:
 DEEPSEEK_REQUEST_COUNT = 40   # API maximum is 50; 40 = the run's full page budget
 DEEPSEEK_HEALTHY_LIMIT = 20   # pages added while DuckDuckGo is delivering
 DEEPSEEK_FALLBACK_LIMIT = 40  # pages used when DuckDuckGo returns nothing
-DEEPSEEK_TIMEOUT = 10.0
+# The search request needs headroom (its result list is the run's whole page
+# supply). A page fetch does not: observed DeepSeek fetches answer in 1-3s and
+# half of the fallback attempts used to run to the old 10s cap, so the fetch
+# tier is bounded tightly while the search call keeps the larger window.
+DEEPSEEK_SEARCH_TIMEOUT = 10.0
+DEEPSEEK_FETCH_TIMEOUT = 5.0
 
 
 def deepseek_enabled() -> bool:
@@ -3157,7 +3193,7 @@ class DeepSeekSearch:
                 "Content-Type": "application/json",
             },
         )
-        with urllib.request.urlopen(req, timeout=DEEPSEEK_TIMEOUT) as resp:
+        with urllib.request.urlopen(req, timeout=DEEPSEEK_SEARCH_TIMEOUT) as resp:
             data = json.loads(resp.read().decode("utf-8", errors="replace"))
         results: List[Tuple[str, str, str]] = []
         for item in data.get("results") or []:
@@ -3198,7 +3234,7 @@ class DeepSeekFetch:
             },
         )
         try:
-            with urllib.request.urlopen(req, timeout=DEEPSEEK_TIMEOUT) as resp:
+            with urllib.request.urlopen(req, timeout=DEEPSEEK_FETCH_TIMEOUT) as resp:
                 data = json.loads(resp.read().decode("utf-8", errors="replace"))
         except Exception as e:
             code = getattr(e, "code", None)
@@ -3225,10 +3261,41 @@ def _fetch_with_deepseek(url: str, min_length: int) -> FetchResult:
     return result
 
 
+# Dedicated pool for the fallback fetches. The API limits request *starts*
+# (5/s per account, Search and Fetch share it), not concurrency — the pacing
+# below enforces that separately. The default asyncio executor is sized at
+# cpu+4 (8 on a 4-CPU box), so a 30-page fallback queued in waves and every
+# wave paid the full timeout. Worst-case in flight = QPS x fetch timeout
+# (4 x 5s = 20); 24 workers leave headroom without unbounded threads.
+DEEPSEEK_FETCH_WORKERS = 24
+_deepseek_fetch_pool: Optional[ThreadPoolExecutor] = None
+
+
+def _get_deepseek_fetch_pool() -> ThreadPoolExecutor:
+    global _deepseek_fetch_pool
+    if _deepseek_fetch_pool is None:
+        _deepseek_fetch_pool = ThreadPoolExecutor(
+            max_workers=DEEPSEEK_FETCH_WORKERS,
+            thread_name_prefix="deepseek-fetch",
+        )
+    return _deepseek_fetch_pool
+
+
+def _shutdown_deepseek_fetch_pool() -> None:
+    global _deepseek_fetch_pool
+    if _deepseek_fetch_pool is not None:
+        _deepseek_fetch_pool.shutdown(wait=False, cancel_futures=True)
+        _deepseek_fetch_pool = None
+
+
+atexit.register(_shutdown_deepseek_fetch_pool)
+
+
 # Search mode retries every failed page in parallel, while the API allows 5
 # requests/second per account (Search and Fetch share it). Starts are paced,
 # not serialised: a response takes seconds, so pacing starts keeps the API
-# inside its limit without collapsing the run into one fetch at a time.
+# inside its limit without collapsing the run into one fetch at a time. The
+# calls themselves run on the dedicated pool above, not the default executor.
 DEEPSEEK_FETCH_QPS = 4
 _DEEPSEEK_CALL_TIMES: List[float] = []
 
@@ -3248,12 +3315,14 @@ async def _deepseek_fetch_paced(url: str, min_length: int) -> FetchResult:
     """Paced DeepSeek fetch, with one retry when the API answers 429."""
     loop = asyncio.get_running_loop()
     await _deepseek_start_slot()
-    result = await loop.run_in_executor(None, _fetch_with_deepseek, url, min_length)
+    result = await loop.run_in_executor(
+        _get_deepseek_fetch_pool(), _fetch_with_deepseek, url, min_length,
+    )
     if not result.success and result.error == "HTTP 429":
         await asyncio.sleep(1.0)
         await _deepseek_start_slot()
         result = await loop.run_in_executor(
-            None, _fetch_with_deepseek, url, min_length,
+            _get_deepseek_fetch_pool(), _fetch_with_deepseek, url, min_length,
         )
     return result
 
@@ -3279,6 +3348,7 @@ async def run_research_async(
     progress.message(f'Researching: "{config.query}"')
 
     urls: List[str] = []
+    pdf_links: List[Tuple[str, str]] = []
     fetch_queue: asyncio.Queue[Optional[str]] = asyncio.Queue()
     result_queue: asyncio.Queue[Optional[FetchResult]] = asyncio.Queue()
     stats = ResearchStats(query=config.query)
@@ -3289,6 +3359,7 @@ async def run_research_async(
         t0 = time.monotonic()
 
         skipped = 0
+        ddg_seen = 0
 
         def search_and_stream():
             nonlocal skipped
@@ -3355,6 +3426,9 @@ async def run_research_async(
                     seen_in_search.add(url)
                     urls.append(url)
                     stats.urls_searched = len(urls)
+                    if _is_pdf_url(url):
+                        pdf_links.append((url, title))
+                        continue
                     stats.deepseek_urls += 1
                     loop.call_soon_threadsafe(fetch_queue.put_nowait, url)
                     enqueued += 1
@@ -3363,8 +3437,8 @@ async def run_research_async(
 
             def consume_primary(timelimit: Optional[str]) -> None:
                 # Streams into the fetch queue as it iterates, so fetching still
-                # overlaps the search. `ddg_enqueued` is the zero-result signal.
-                nonlocal enqueued, ddg_enqueued, skipped
+                # overlaps the search. `ddg_seen` is the zero-result signal.
+                nonlocal enqueued, ddg_enqueued, ddg_seen, skipped
                 for url, title, snippet in searcher.search(
                     config.query, config.search_results, timelimit=timelimit
                 ):
@@ -3384,6 +3458,16 @@ async def run_research_async(
                             print(f"  [skip] {_host} relevance=0 | {title[:50]}", flush=True)
                         skipped += 1
                         continue
+                    # "Produced something" = passed the relevance gate, whether it
+                    # was fetched or listed as a PDF link. Keeps the old retry
+                    # behaviour (retry only on nothing) while a PDF-only response
+                    # is not mistaken for DDG being down.
+                    ddg_seen += 1
+                    if _is_pdf_url(url):
+                        # Listed for on-demand --url, never queued: a PDF's
+                        # transfer + extraction is the run's worst tail.
+                        pdf_links.append((url, title))
+                        continue
                     loop.call_soon_threadsafe(fetch_queue.put_nowait, url)
                     enqueued += 1
                     ddg_enqueued += 1
@@ -3394,7 +3478,7 @@ async def run_research_async(
             attempts = 0
             while attempts < SEARCH_MAX_ATTEMPTS:
                 attempts += 1
-                before = ddg_enqueued
+                before = ddg_seen
                 try:
                     consume_primary(config.since or None)
                 except Exception as e:
@@ -3406,7 +3490,7 @@ async def run_research_async(
                         print(f"  DDG search failed ({type(e).__name__})", file=sys.stderr)
                 # Retry only when the attempt produced NOTHING. A partial set is
                 # never re-requested.
-                if ddg_enqueued > before or attempts >= SEARCH_MAX_ATTEMPTS:
+                if ddg_seen > before or attempts >= SEARCH_MAX_ATTEMPTS:
                     break
                 # DeepSeek may already be covering the run: spend the would-be
                 # retry delay waiting for its request, then skip the retry.
@@ -3426,20 +3510,20 @@ async def run_research_async(
             # DeepSeek remainder: top up to the mode's page limit. A DDG run
             # that returned nothing hands the whole budget to DeepSeek.
             if ds_future is not None:
-                if ddg_enqueued == 0:
+                if ddg_seen == 0:
                     status["ddg_down"] = True
                     status["deepseek_fallback"] = True
                 if not _ds_ready():
                     try:
-                        ds_future.result(timeout=DEEPSEEK_TIMEOUT + 2)
+                        ds_future.result(timeout=DEEPSEEK_SEARCH_TIMEOUT + 2)
                     except Exception:
                         pass
-                ds_limit = (DEEPSEEK_FALLBACK_LIMIT if ddg_enqueued == 0
+                ds_limit = (DEEPSEEK_FALLBACK_LIMIT if ddg_seen == 0
                             else DEEPSEEK_HEALTHY_LIMIT)
                 while _enqueue_ds(ds_limit):
                     pass
                 status["deepseek_urls"] = stats.deepseek_urls
-                status["ddg_urls"] = ddg_enqueued
+                status["ddg_urls"] = ddg_seen
                 ds_pool.shutdown(wait=False)
 
             # Supplement with topic-specific bonus sources (not in web search)
@@ -3456,6 +3540,9 @@ async def run_research_async(
                 seen_in_search.add(url)
                 urls.append(url)
                 stats.urls_searched = len(urls)
+                if _is_pdf_url(url):
+                    pdf_links.append((url, ""))
+                    return
                 if source:
                     stats.bonus_sources[source] = stats.bonus_sources.get(source, 0) + 1
                 loop.call_soon_threadsafe(fetch_queue.put_nowait, url)
@@ -3710,6 +3797,7 @@ async def run_research_async(
                 with ThreadPoolExecutor(max_workers=len(bonus_fns)) as bonus_pool:
                     list(bonus_pool.map(lambda f: f(), bonus_fns))
             status["search_urls"] = stats.urls_searched
+            status["pdf_links"] = list(pdf_links)
 
         try:
             with ThreadPoolExecutor(max_workers=1) as executor:
@@ -3730,6 +3818,8 @@ async def run_research_async(
                 source_info += f" + bonus: {', '.join(bonus_parts)}"
             if skipped:
                 source_info += f", {skipped} filtered"
+            if pdf_links:
+                source_info += f", {len(pdf_links)} PDF links"
             progress.message(f"  [search] {source_info} in {search_elapsed:.1f}s")
             if status.get("deepseek_error"):
                 progress.message(
@@ -4746,6 +4836,7 @@ def _build_index(
     notes: List[str],
     start_lines: Optional[List[int]] = None,
     line_offset: int = 0,
+    pdf_links: Optional[List[Tuple[str, str]]] = None,
 ) -> str:
     """The index that heads the report file: header, one line per page, NOTES.
 
@@ -4753,6 +4844,9 @@ def _build_index(
     final report file (start_lines are relative to the page text; line_offset is
     index length + separator). Line accounting must stay exact — the locators
     are computed here, never by the model.
+
+    PDF links are listed by URL only (not fetched in search mode): they sit in
+    the index so the model can hand one to `--url <link>` when it matters.
     """
     failed = len(failures)
     failure_note = ""
@@ -4770,7 +4864,14 @@ def _build_index(
             body.append(f"{i}.{date_part} line {base} — {r.title} — {r.url}")
         else:
             body.append(f"{i}.{date_part} line {base} — {r.url}")
-    return "\n".join(header + body + notes)
+    pdf_block: List[str] = []
+    if pdf_links:
+        pdf_block.append(
+            f"PDF LINKS ({len(pdf_links)}, not fetched — use --url <link> when needed):"
+        )
+        for link, link_title in pdf_links:
+            pdf_block.append(f"- {link} — {link_title}" if link_title else f"- {link}")
+    return "\n".join(header + body + pdf_block + notes)
 
 
 def _assemble_report(
@@ -4783,6 +4884,7 @@ def _assemble_report(
     f3_stats: Optional[dict] = None,
     warnings: Optional[List[str]] = None,
     extra_notes: Optional[List[str]] = None,
+    pdf_links: Optional[List[Tuple[str, str]]] = None,
 ) -> Tuple[str, int]:
     """Return (file_content, index_line_count) for one run.
 
@@ -4797,23 +4899,29 @@ def _assemble_report(
         sum(1 for _, _, t in pages if t), since, warnings, extra_notes,
     )
     if not pages:
-        index = _build_index(query, pages, failures, notes)
+        index = _build_index(query, pages, failures, notes, pdf_links=pdf_links)
         return index, len(index.splitlines())
     content, start_lines = _build_report_file(pages)
-    probe = _build_index(query, pages, failures, notes, start_lines, 0)
+    probe = _build_index(query, pages, failures, notes, start_lines, 0,
+                         pdf_links=pdf_links)
     offset = len(probe.splitlines()) + 1  # +1 = the `---` separator line
-    index = _build_index(query, pages, failures, notes, start_lines, offset)
+    index = _build_index(query, pages, failures, notes, start_lines, offset,
+                         pdf_links=pdf_links)
     return index + "\n---\n" + content, len(index.splitlines())
 
 
-def _report_line(path: Path, index_lines: int, page_count: int, failures: int) -> str:
+def _report_line(path: Path, index_lines: int, page_count: int, failures: int,
+                 pdf_count: int = 0) -> str:
     """The ONE stdout line of search mode. This is the whole stdout contract."""
     failure_part = ""
     if failures:
         failure_part = f", {failures} fetch failure" + ("" if failures == 1 else "s")
-    empty_part = " — no usable results" if page_count == 0 else ""
+    pdf_part = ""
+    if pdf_count:
+        pdf_part = f", {pdf_count} PDF link" + ("" if pdf_count == 1 else "s")
+    empty_part = " — no usable results" if page_count == 0 and not pdf_count else ""
     return (f"REPORT: {path} | INDEX lines 1-{index_lines} | "
-            f"{page_count} pages{failure_part}{empty_part}")
+            f"{page_count} pages{failure_part}{pdf_part}{empty_part}")
 
 
 def _parse_browser_output(out: str) -> Tuple[Optional[str], Optional[str]]:
@@ -5347,6 +5455,7 @@ def run_research(config: ResearchConfig, status: Optional[dict] = None) -> Optio
                 results.append(result)
         finally:
             _shutdown_extract_pool()
+            _shutdown_deepseek_fetch_pool()
 
     # Whole-run bound for the async core on ALL platforms (Windows has no
     # SIGALRM, so the Unix watchdog in main() does not apply there). This
@@ -5519,8 +5628,8 @@ Structured sources: RSS/Atom feeds, Hacker News threads, arXiv full text, PDFs (
                     None, _fetch_with_deepseek, u, 100,
                 )
             return await fetch_single_async(
-                u, DEFAULT_TIMEOUT, 100, None, progress=progress, render=render_mode,
-                deepseek=ds_ready,
+                u, URL_FETCH_TIMEOUT, 100, None, progress=progress, render=render_mode,
+                deepseek=ds_ready, hard_cap=URL_FETCH_TIMEOUT,
                 apply_filters=False,  # --url raw mode: page text as extracted, no F4/F1 cleanup
             )
 
@@ -5673,6 +5782,7 @@ Structured sources: RSS/Atom feeds, Hacker News threads, arXiv full text, PDFs (
         t0 = time.monotonic()
         search_status: dict = {}
         results = run_research(config, search_status)
+        pdf_links = search_status.get("pdf_links", [])
         ok = [r for r in (results or []) if r.success]
         # Telemetry fields are computed from the PRE-filter fetch results
         # (unchanged semantics); only "ok" below reflects post-filter survival.
@@ -5709,16 +5819,17 @@ Structured sources: RSS/Atom feeds, Hacker News threads, arXiv full text, PDFs (
             "query": config.query, "mode": "search",
             "urls_fetched": len(ok),
             "content_chars": fetched_chars,
-            "ok": bool(pages), "error": None,
+            "ok": bool(pages or pdf_links), "error": None,
             "ms": int((time.monotonic() - t0) * 1000), "timeout": False,
             "deepseek_urls": search_status.get("deepseek_urls", 0),
             "deepseek_fallback": bool(search_status.get("deepseek_fallback")),
             "deepseek_fetches": sum(1 for r in (results or []) if r.source == "deepseek"),
             "deepseek_fetch_attempts": _DEEPSEEK_FETCH_ATTEMPTS,
+            "pdf_links": len(pdf_links),
             **quality_fields,
         })
         extra_notes: List[str] = []
-        if not pages:
+        if not pages and not pdf_links:
             if ok:
                 extra_notes.append(
                     f"no usable results: all {len(ok)} fetched pages were dropped by "
@@ -5738,6 +5849,7 @@ Structured sources: RSS/Atom feeds, Hacker News threads, arXiv full text, PDFs (
             config.query, pages, failures, quality_stats, since=config.since,
             search_status=search_status, f3_stats=f3_stats,
             warnings=run_warnings, extra_notes=extra_notes,
+            pdf_links=pdf_links,
         )
         write_error = _write_report_file(report_path, report_content)
         if write_error:
@@ -5750,10 +5862,11 @@ Structured sources: RSS/Atom feeds, Hacker News threads, arXiv full text, PDFs (
             print(f"warning: report directory unwritable — report saved to {fallback}",
                   file=sys.stderr)
             report_path = fallback
-        print(_report_line(report_path, index_lines, len(pages), len(failures)))
+        print(_report_line(report_path, index_lines, len(pages), len(failures),
+                           len(pdf_links)))
         # Redundant path on stderr: harnesses capture both streams.
         print(f"REPORT: {report_path}", file=sys.stderr)
-        if not pages:
+        if not pages and not pdf_links:
             print(extra_notes[0], file=sys.stderr)
             sys.exit(1)
 
