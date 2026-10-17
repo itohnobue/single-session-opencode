@@ -34,13 +34,22 @@ Unified tool combining search and fetch into a single optimized workflow:
    search cost +44% fetch time and rescued ~0-2 pages — the browser's value
    is --url single-page rendering, not bulk search fetching). The browser
    machinery (probe/install/escalation) is used ONLY by --url mode.
+8. --since d|w|m|y: optional engine-side time window for the primary search
+   only (bonus sources ignore it). Never inferred from the query.
+9. --map URL: lists URLs on the URL's host inside its path subtree (sitemap,
+   else page links), one per line, fixed cap 100. Lists only, no fetching.
+10. --cite SEED: citers + references for one paper (DOI, doi.org/arXiv URL or
+   OpenAlex id), 25 per section, OpenAlex with a Semantic Scholar fallback.
 
 Usage:
     python web_research.py "search query"
     python web_research.py "query" --sci | --med | --tech   # Domain bonus sources (arXiv, PubMed, HN/Stack Overflow/GitHub)
+    python web_research.py "query" --since w                # Optional engine time window (d/w/m/y)
     python web_research.py --url https://example.com   # Save one URL's full page text to a report file (path printed)
+    python web_research.py --map https://example.com/docs/   # List URLs in that path subtree
+    python web_research.py --cite 10.1038/s41586-020-2649-2  # Citers + references for a paper
 
-(fixed tuned settings: search 30 results, fetch up to 20 pages, plain-text output)
+(fixed tuned settings: request up to 30 results, fetch up to 20 pages, plain-text output)
 """
 
 from __future__ import annotations
@@ -64,6 +73,7 @@ import urllib.parse
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from html import unescape
+from html.parser import HTMLParser
 from io import StringIO
 from pathlib import Path
 from typing import (
@@ -116,6 +126,28 @@ def _wall_timeout_default() -> int:
 
 
 WALL_TIMEOUT: int = _wall_timeout_default()
+
+# ---------------------------------------------------------------------------
+# Search-backend retry
+#
+# ddgs raises "No results found" both for a genuinely empty query and under
+# throttling (observed live: back-to-back calls fail, the same query succeeds
+# seconds later). One retry is the bound: it rescues the throttle case at the
+# cost of one extra request when the query is truly empty. A partial result set
+# is never re-requested.
+# ---------------------------------------------------------------------------
+SEARCH_MAX_ATTEMPTS: int = 2
+
+
+def _search_retry_delay_default() -> float:
+    """Seconds between search attempts; env-overridable, fail-soft."""
+    try:
+        return max(0.0, float(os.environ.get("WEB_RESEARCH_SEARCH_RETRY_DELAY", "2.5")))
+    except ValueError:
+        return 2.5
+
+
+SEARCH_RETRY_DELAY: float = _search_retry_delay_default()
 
 # ---------------------------------------------------------------------------
 # Domain routing
@@ -534,6 +566,9 @@ class ResearchConfig:
     scientific: bool = False
     medical: bool = False
     tech: bool = False
+    # Optional time window for the primary search only (d/w/m/y, maps to the
+    # engine's timelimit). Never inferred: the caller asks for it explicitly.
+    since: str = ""
     escalation_budget: int = 3  # max browser escalations in --url auto mode (search is static-only)
 
 
@@ -555,6 +590,11 @@ class FetchResult:
     # then <img> src/data-src/data-original/srcset). Printed as one `[images]`
     # line under the page's `=== <url> ===` header in the full report.
     images: List[str] = field(default_factory=list)
+    # Publication date for the digest (informational only — the recency filter
+    # F7 keeps its own parsing and does NOT consume these fields). ISO day.
+    date: str = ""
+    # Provenance of `date`: "meta" | "jsonld" | "visible" | "url" | "modified".
+    date_source: str = ""
 
 
 @dataclass
@@ -2354,7 +2394,9 @@ def _fetch_with_real_browser(url: str, timeout: int = 180) -> Optional[FetchResu
                            source="chrome")
     body = raw.split("\n\n", 1)[1].strip() if "\n\n" in raw else raw.strip()
     title = next((ln[7:].strip() for ln in raw.splitlines()[:12] if ln.startswith("title: ")), "")
-    return FetchResult(url=url, success=True, content=body, title=title, source="chrome")
+    date_iso, date_source = _resolve_page_date("", body, url)
+    return FetchResult(url=url, success=True, content=body, title=title, source="chrome",
+                       date=date_iso, date_source=date_source)
 
 
 async def _maybe_escalate(
@@ -2598,6 +2640,9 @@ async def fetch_single_async(
                     progress.url_result(url, False, elapsed, _pdf_err)
                 return FetchResult(url=url, success=False, error=_pdf_err)
             result = _create_fetch_result(url, content, min_content_length, max_content_length, query=query, apply_filters=apply_filters)
+            if result.success:
+                # A PDF has no meta tags to read; the date comes from URL/visible text.
+                result.date, result.date_source = _resolve_page_date("", result.content, url)
             if progress:
                 progress.url_result(url, result.success, elapsed, result.error or "")
             return result
@@ -2691,6 +2736,16 @@ async def fetch_single_async(
                 ):
                     result = wb_result
         result.images = images
+        # Page date for the digest (informational). Computed after the Wayback
+        # fallback so the marker describes the content actually delivered; the
+        # recency filter F7 does not consume these fields.
+        if result.success:
+            try:
+                result.date, result.date_source = await loop.run_in_executor(
+                    _get_extract_pool(), _resolve_page_date, raw_html, result.content, url
+                )
+            except Exception:
+                pass
         # Escalation ladder: retry-worthy failures (HTTP 403/429/5xx, CAPTCHA,
         # Timeout, Too short) get one retry with real Google Chrome (the same tier
         # as --url-chrome, provisioned on first use by the preflight above),
@@ -2726,6 +2781,7 @@ async def fetch_single_async(
 # =============================================================================
 # SEARCH BACKENDS
 # =============================================================================
+
 
 _RE_HTML_TAGS = re.compile(r"<[^>]+>")
 
@@ -2808,8 +2864,13 @@ class DuckDuckGoSearch:
         query: str,
         num_results: int = 50,
         region: Optional[str] = None,
+        timelimit: Optional[str] = None,
     ) -> Iterator[Tuple[str, str, str]]:
-        """Search DuckDuckGo and yield (url, title, snippet) tuples."""
+        """Search DuckDuckGo and yield (url, title, snippet) tuples.
+
+        timelimit: "d" | "w" | "m" | "y" — engine-side time window (ddgs maps
+        it per backend). Only set when the caller explicitly asked for it.
+        """
         seen_urls: Set[str] = set()
         count = 0
 
@@ -2817,6 +2878,8 @@ class DuckDuckGoSearch:
         ddg_kwargs = {}
         if region:
             ddg_kwargs["region"] = region
+        if timelimit:
+            ddg_kwargs["timelimit"] = timelimit
         # Request exactly `num_results` (not 2x): paginating a doubled count costs
         # ~2-3s and most extra hits are duplicates/blocked anyway — the count
         # loop already caps the yield.
@@ -2831,26 +2894,29 @@ class DuckDuckGoSearch:
 
 
 class MultiSearch:
-    """DuckDuckGo search — the only search backend."""
+    """DuckDuckGo search — the only search backend.
+
+    Exceptions are NOT swallowed here: the caller classifies them (backend
+    throttle vs. a genuinely empty query) and decides whether to retry.
+    """
 
     def search(
         self,
         query: str,
         num_results: int = 20,
+        timelimit: Optional[str] = None,
     ) -> Iterator[Tuple[str, str, str]]:
         """Search DuckDuckGo and yield (url, title, snippet) tuples."""
         seen_urls: Set[str] = set()
         region = _detect_ddg_region(query)
 
         ddg = DuckDuckGoSearch()
-        try:
-            for url, title, snippet in ddg.search(query, num_results, region=region):
-                if url not in seen_urls:
-                    seen_urls.add(url)
-                    yield url, title, snippet
-        except Exception as e:
-            logger.debug(f"DDG search failed: {e}")
-            print(f"  DDG search failed ({type(e).__name__})", file=sys.stderr)
+        for url, title, snippet in ddg.search(
+            query, num_results, region=region, timelimit=timelimit
+        ):
+            if url not in seen_urls:
+                seen_urls.add(url)
+                yield url, title, snippet
 
 
 # =============================================================================
@@ -2861,12 +2927,16 @@ async def run_research_async(
     config: ResearchConfig,
     progress: ProgressReporter,
     global_seen_urls: Optional[Set[str]] = None,
+    status: Optional[dict] = None,
 ) -> AsyncIterator[FetchResult]:
     """
     Async streaming research workflow.
     Yields FetchResult objects as they complete.
     Pass global_seen_urls to dedup across multiple parallel queries.
+    status: optional dict filled with search diagnostics (attempts, error,
+    URL count) so the caller can print an accurate failure reason.
     """
+    status = {} if status is None else status
     progress.message(f'Researching: "{config.query}"')
 
     urls: List[str] = []
@@ -2885,25 +2955,55 @@ async def run_research_async(
             nonlocal skipped
             enqueued = 0
             seen_in_search: Set[str] = set()
-            for url, title, snippet in searcher.search(config.query, config.search_results):
-                if global_seen_urls is not None:
-                    if url in global_seen_urls:
+
+            def consume_primary(timelimit: Optional[str]) -> None:
+                # Streams into the fetch queue as it iterates, so fetching still
+                # overlaps the search. `enqueued` is the zero-result signal.
+                nonlocal enqueued, skipped
+                for url, title, snippet in searcher.search(
+                    config.query, config.search_results, timelimit=timelimit
+                ):
+                    if global_seen_urls is not None:
+                        if url in global_seen_urls:
+                            continue
+                        global_seen_urls.add(url)
+                    seen_in_search.add(url)
+                    urls.append(url)
+                    stats.urls_searched = len(urls)
+                    # Snippet relevance gate: skip URLs with zero query word overlap
+                    # Always enqueue at least 5 URLs (safety net for edge cases)
+                    relevance = _snippet_relevance(config.query, title, snippet)
+                    if relevance == 0 and enqueued >= 5:
+                        if progress.verbose:
+                            _host = urllib.parse.urlparse(url).hostname or url
+                            print(f"  [skip] {_host} relevance=0 | {title[:50]}", flush=True)
+                        skipped += 1
                         continue
-                    global_seen_urls.add(url)
-                seen_in_search.add(url)
-                urls.append(url)
-                stats.urls_searched = len(urls)
-                # Snippet relevance gate: skip URLs with zero query word overlap
-                # Always enqueue at least 5 URLs (safety net for edge cases)
-                relevance = _snippet_relevance(config.query, title, snippet)
-                if relevance == 0 and enqueued >= 5:
+                    loop.call_soon_threadsafe(fetch_queue.put_nowait, url)
+                    enqueued += 1
+
+            attempts = 0
+            while attempts < SEARCH_MAX_ATTEMPTS:
+                attempts += 1
+                before = enqueued
+                try:
+                    consume_primary(config.since or None)
+                except Exception as e:
+                    # ddgs raises for both throttling and a genuinely empty query;
+                    # the class name goes into the run status for the final report.
+                    status["search_error"] = type(e).__name__
+                    logger.debug(f"DDG search failed: {e}")
                     if progress.verbose:
-                        _host = urllib.parse.urlparse(url).hostname or url
-                        print(f"  [skip] {_host} relevance=0 | {title[:50]}", flush=True)
-                    skipped += 1
-                    continue
-                loop.call_soon_threadsafe(fetch_queue.put_nowait, url)
-                enqueued += 1
+                        print(f"  DDG search failed ({type(e).__name__})", file=sys.stderr)
+                # Retry only when the attempt produced NOTHING. A partial set is
+                # never re-requested.
+                if enqueued > before or attempts >= SEARCH_MAX_ATTEMPTS:
+                    break
+                progress.message(
+                    f"  [search] 0 URLs; retrying in {SEARCH_RETRY_DELAY:.1f}s"
+                )
+                time.sleep(SEARCH_RETRY_DELAY)
+            status["search_attempts"] = attempts
 
             # Supplement with topic-specific bonus sources (not in web search)
             stats.bonus_sources = {}
@@ -2925,10 +3025,14 @@ async def run_research_async(
                 enqueued += 1
 
             # Run bonus searches in parallel (topic-specific sources).
-            # NOTE: DDG is hit exactly ONCE per run (the main text search).
+            # NOTE: DDG is hit exactly ONCE per run (the primary text search).
             # The former DDG news bonus was removed: a second hit on the same
             # hostname per run doubles the chance of DDG IP rate-limiting and
             # contributed ~1 URL per run (often failing with DDGSException).
+            # An academic site: supplement was tried and removed for the same
+            # reason: a fixed delay before it did not improve reliability, and
+            # it raised the per-run call count. Publisher coverage stays a
+            # manual second query (site: operators pass through unchanged).
             def _bonus_arxiv():
                 """Search arXiv API, fallback to Semantic Scholar if arXiv fails."""
                 arxiv_ok = False
@@ -3168,6 +3272,7 @@ async def run_research_async(
             if bonus_fns:
                 with ThreadPoolExecutor(max_workers=len(bonus_fns)) as bonus_pool:
                     list(bonus_pool.map(lambda f: f(), bonus_fns))
+            status["search_urls"] = stats.urls_searched
 
         try:
             with ThreadPoolExecutor(max_workers=1) as executor:
@@ -3337,6 +3442,8 @@ def _dedup_results(
             source=r.source,
             kind=r.kind,
             images=r.images,
+            date=r.date,
+            date_source=r.date_source,
         ))
 
     # Log dedup effectiveness at debug level
@@ -3453,7 +3560,7 @@ def _dedup_cross_page_sentences(
         out.append(FetchResult(
             url=r.url, success=True, content=new_content,
             title=r.title, source=r.source, kind=r.kind,
-            images=r.images,
+            images=r.images, date=r.date, date_source=r.date_source,
         ))
 
     # Log dedup effectiveness at debug level
@@ -3753,17 +3860,19 @@ _RE_URL_DATE = re.compile(r"/(20\d{2})/(\d{1,2})/(\d{1,2})/")
 _RE_QUERY_YEAR = re.compile(r"\b(19|20)\d{2}\b")
 
 
-def _extract_page_date(content: str, url: str) -> Optional[object]:
-    """Best-effort publication date from the page content (recency filter).
+def _page_date_with_source(content: str, url: str) -> Tuple[Optional[object], str]:
+    """Best-effort publication date plus provenance.
 
     Priority chain (all conservative, fail-soft): [meta] published/updated
     lines written by the JSON-LD extractor -> visible month-name byline dates
     near the top -> URL path /YYYY/MM/DD. Never trusts HTTP Last-Modified (CDNs
     reset it) and never parses arbitrary YYYY-MM-DD tokens in the body (they
-    match version strings, citations, junk). Returns a datetime.date or None.
+    match version strings, citations, junk). Returns (datetime.date, source)
+    where source is "jsonld-pub" | "jsonld-upd" | "visible" | "url"; (None, "")
+    when undated. The recency filter F7 consumes only the date; the digest uses
+    the source to mark heuristic dates.
     """
-    from datetime import datetime, timedelta, date
-    now = datetime.now()
+    from datetime import datetime
     head = content[:2000]
 
     # 1. [meta] blocks produced by extract_jsonld_metadata (datePublished/dateModified).
@@ -3775,10 +3884,8 @@ def _extract_page_date(content: str, url: str) -> Optional[object]:
     #    form) keeps body-text dates from matching. They are normally prepended
     #    at the top, but scan the whole content — the marker prefix makes false
     #    matches in body text essentially impossible.
-    for pat in (
-        re.compile(r"\bpublished:\s*(\d{4})-(\d{1,2})-(\d{1,2})", re.IGNORECASE),
-        re.compile(r"\bupdated:\s*(\d{4})-(\d{1,2})-(\d{1,2})", re.IGNORECASE),
-    ):
+    for label, source in (("published", "jsonld-pub"), ("updated", "jsonld-upd")):
+        pat = re.compile(rf"\b{label}:\s*(\d{{4}})-(\d{{1,2}})-(\d{{1,2}})", re.IGNORECASE)
         pos = 0
         while True:
             s = content.find("[meta]", pos)
@@ -3796,7 +3903,7 @@ def _extract_page_date(content: str, url: str) -> Optional[object]:
             if m:
                 try:
                     d = datetime(int(m.group(1)), int(m.group(2)), int(m.group(3))).date()
-                    return d
+                    return d, source
                 except ValueError:
                     pass
 
@@ -3806,7 +3913,7 @@ def _extract_page_date(content: str, url: str) -> Optional[object]:
         try:
             month = next(i + 1 for i, mo in enumerate(_MONTH_NAMES) if mo.lower()[:3] == m.group(1).lower()[:3])
             d = datetime(int(m.group(3)), month, int(m.group(2))).date()
-            return d
+            return d, "visible"
         except ValueError:
             pass
     m = _RE_DAY_MONTH_YEAR.search(head)
@@ -3814,7 +3921,7 @@ def _extract_page_date(content: str, url: str) -> Optional[object]:
         try:
             month = next(i + 1 for i, mo in enumerate(_MONTH_NAMES) if mo.lower()[:3] == m.group(2).lower()[:3])
             d = datetime(int(m.group(3)), month, int(m.group(1))).date()
-            return d
+            return d, "visible"
         except ValueError:
             pass
 
@@ -3823,11 +3930,110 @@ def _extract_page_date(content: str, url: str) -> Optional[object]:
     if m:
         try:
             d = datetime(int(m.group(1)), int(m.group(2)), int(m.group(3))).date()
-            return d
+            return d, "url"
         except ValueError:
             pass
 
-    return None
+    return None, ""
+
+
+def _extract_page_date(content: str, url: str) -> Optional[object]:
+    """Date-only wrapper (used by the recency filter F7; behaviour unchanged)."""
+    return _page_date_with_source(content, url)[0]
+
+
+# Meta tags carry publication dates that the JSON-LD extractor never sees.
+# Keys are lowercased attribute values of property/name/itemprop.
+_META_PUBLISHED_KEYS = frozenset({
+    "article:published_time", "og:article:published_time",
+    "datepublished", "date", "dc.date", "dc.date.issued", "dcterms.date",
+    "dcterms.created", "pubdate", "publishdate", "publication_date",
+    "citation_publication_date", "citation_date",
+})
+_META_UPDATED_KEYS = frozenset({
+    "article:modified_time", "og:article:updated_time", "datemodified",
+    "dcterms.modified", "last-modified", "revised",
+})
+_RE_ISO_DAY = re.compile(r"(\d{4})[-/](\d{1,2})[-/](\d{1,2})")
+
+
+def _iso_day(value: str) -> str:
+    """ISO day from a date-ish string; "" when absent or implausible."""
+    from datetime import datetime as _dt
+    m = _RE_ISO_DAY.search(value or "")
+    if not m:
+        return ""
+    try:
+        d = _dt(int(m.group(1)), int(m.group(2)), int(m.group(3))).date()
+    except ValueError:
+        return ""
+    # Reject junk years (licence years in footers, placeholder 0000/9999 dates).
+    # 1970 keeps dates on classic papers and old docs while still rejecting
+    # placeholders; the upper bound tolerates a slightly future-dated page.
+    if not (1970 <= d.year <= _dt.now().year + 1):
+        return ""
+    return d.isoformat()
+
+
+def _extract_meta_dates(raw_html: str) -> Tuple[str, str]:
+    """(published, updated) ISO days from <meta> tags and <time datetime>.
+
+    Scans only the first 16 KB (the head), never the body: body dates match
+    version strings and comments. Fail-soft: ("", "") when nothing is found.
+    """
+    head = (raw_html or "")[:16384]
+    pub = ""
+    upd = ""
+    for tag in re.findall(r"<meta\b[^>]*>", head, re.I):
+        attrs = _img_tag_attrs(tag)
+        key = (attrs.get("property") or attrs.get("name") or attrs.get("itemprop") or "").strip().lower()
+        if not key:
+            continue
+        day = _iso_day(attrs.get("content") or attrs.get("datetime") or "")
+        if not day:
+            continue
+        if not pub and key in _META_PUBLISHED_KEYS:
+            pub = day
+        elif not upd and key in _META_UPDATED_KEYS:
+            upd = day
+    if not pub:
+        m = re.search(r"<time\b[^>]*\bdatetime\s*=\s*[\"']([^\"']+)", head, re.I)
+        if m:
+            pub = _iso_day(m.group(1))
+    return pub, upd
+
+
+def _resolve_page_date(raw_html: str, content: str, url: str) -> Tuple[str, str]:
+    """Destination date for the digest: (ISO day, source).
+
+    Priority: published over modified, structured over heuristic —
+    meta published > JSON-LD published > visible byline > URL > meta modified >
+    JSON-LD modified. Informational only — never fed to the recency filter.
+    """
+    pub_meta, upd_meta = _extract_meta_dates(raw_html)
+    d, source = _page_date_with_source(content, url)
+    if pub_meta:
+        return pub_meta, "meta"
+    if source == "jsonld-pub":
+        return d.isoformat(), "jsonld"
+    if source in ("visible", "url"):
+        return d.isoformat(), source
+    if upd_meta:
+        return upd_meta, "modified"
+    if source == "jsonld-upd":
+        return d.isoformat(), "modified"
+    return "", ""
+
+
+def _format_digest_date(iso: str, source: str) -> str:
+    """Digest marker: exact, heuristic, or updated-only. "" when undated."""
+    if not iso:
+        return ""
+    if source == "modified":
+        return f"[upd {iso}]"
+    if source in ("visible", "url"):
+        return f"[~{iso}]"
+    return f"[{iso}]"
 
 
 def _is_recency_sensitive_query(query: str) -> bool:
@@ -4091,9 +4297,11 @@ def _build_digest(
     start_lines: Optional[List[int]] = None,
     terms: Optional[List[str]] = None,
     line_offset: int = 0,
+    since: str = "",
 ) -> str:
     """Technical index digest: FULL REPORT path FIRST and LAST, stats, one
-    technical line per page (`N. [size] [trunc] @line L @hit H — Title — URL`).
+    technical line per page (`N. [size] [date] [trunc] @line L @hit H — Title — URL`,
+    the date field omitted when the page is undated).
 
     start_lines: 1-based `=== <url> ===` header lines relative to the report
     content; line_offset: lines the digest + separator occupy at the top of the
@@ -4123,13 +4331,15 @@ def _build_digest(
         if qparts:
             quality_part = " | " + " | ".join(qparts)
     full_report_line = f"FULL REPORT: {report_path} — grep or read this file for full content"
+    since_part = f" | since: {since}" if since else ""
     lines = [
         full_report_line,
         f"RESEARCH: {query}",
-        f"Results: {len(pages)} fetched, {len(failures)} failed{reason_part} | {total_chars:,} chars{quality_part} | ordered by relevance",
+        f"Results: {len(pages)} fetched, {len(failures)} failed{reason_part} | {total_chars:,} chars{quality_part}{since_part} | ordered by relevance",
     ]
     for i, (r, text, truncated) in enumerate(pages, 1):
         size = f"[{_human_chars(len(text))}{' trunc' if truncated else ''}]"
+        date_part = f" {_format_digest_date(r.date, r.date_source)}" if r.date else ""
         base = start_lines[i - 1] + line_offset if start_lines else 0
         # A `[images] …` line sits between the header and the page text, so a
         # relative text hit shifts by one before it is made absolute.
@@ -4137,9 +4347,9 @@ def _build_digest(
         hit = _find_hit_line(text, terms) if terms else None
         hit_part = f" @hit {base + img_offset + hit}" if hit else ""
         if r.title:
-            lines.append(f"{i}. {size} @line {base}{hit_part} — {r.title} — {r.url}")
+            lines.append(f"{i}. {size}{date_part} @line {base}{hit_part} — {r.title} — {r.url}")
         else:
-            lines.append(f"{i}. {size} @line {base}{hit_part} — {r.url}")
+            lines.append(f"{i}. {size}{date_part} @line {base}{hit_part} — {r.url}")
     lines.append(full_report_line)
     return "\n".join(lines)
 
@@ -4150,6 +4360,7 @@ def _assemble_report(
     failures: List[FetchResult],
     report_path: Path,
     quality_stats: Optional[dict],
+    since: str = "",
 ) -> Tuple[str, str]:
     """Return (digest, report_content) for one run.
 
@@ -4161,9 +4372,9 @@ def _assemble_report(
     """
     content, start_lines = _build_report_file(pages)
     terms = _query_key_terms(query)
-    probe = _build_digest(query, pages, failures, report_path, quality_stats, start_lines, terms, 0)
+    probe = _build_digest(query, pages, failures, report_path, quality_stats, start_lines, terms, 0, since)
     offset = len(probe.splitlines()) + 1  # +1 = the `---` separator line
-    digest = _build_digest(query, pages, failures, report_path, quality_stats, start_lines, terms, offset)
+    digest = _build_digest(query, pages, failures, report_path, quality_stats, start_lines, terms, offset, since)
     return digest, digest + "\n---\n" + content
 
 
@@ -4178,13 +4389,499 @@ def _write_report_file(path: Path, content: str) -> bool:
 
 
 # =============================================================================
-# MAIN ENTRY POINTS
+# MAIN ENTRY POINTS (modes: search, --map, --cite)
 # =============================================================================
 
-def run_research(config: ResearchConfig) -> Optional[List[FetchResult]]:
+# ---------------------------------------------------------------------------
+# --map: list URLs on a site/subtree — no page fetching
+# ---------------------------------------------------------------------------
+
+# Fixed caps (no user-facing count flags, per the tool's tuned-defaults rule).
+MAP_MAX_URLS: int = 100
+MAP_MAX_SITEMAPS: int = 5            # sitemap documents fetched per run (index + children)
+MAP_MAX_DOC_BYTES: int = 5_000_000   # per fetched document
+MAP_MAX_TOTAL_BYTES: int = 10_000_000
+
+_RE_SITEMAP_HINT = re.compile(r"(?:^|[/._-])sitemap", re.IGNORECASE)
+
+
+def _map_fetch_doc(url: str, budget: List[int]) -> Optional[str]:
+    """Fetch one sitemap/robots/page document: gzip-aware, capped, entity-guarded."""
+    raw = _http_get_bytes(url, timeout=8, max_bytes=MAP_MAX_DOC_BYTES)
+    if not raw:
+        return None
+    budget[0] -= len(raw)
+    if budget[0] < 0:
+        return None
+    if raw[:2] == b"\x1f\x8b":
+        import zlib
+        try:
+            # Bounded inflate: a small gzip can expand to gigabytes, so cap the
+            # OUTPUT (gzip.decompress would allocate it all first).
+            raw = zlib.decompressobj(16 + zlib.MAX_WBITS).decompress(
+                raw, MAP_MAX_DOC_BYTES + 1
+            )
+        except zlib.error:
+            return None
+        if len(raw) > MAP_MAX_DOC_BYTES:
+            return None
+        budget[0] -= len(raw)
+        if budget[0] < 0:
+            return None
+    # Entity-expansion guard: a sitemap never needs an internal DTD.
+    if b"<!ENTITY" in raw[:100_000]:
+        return None
+    return raw.decode("utf-8", errors="replace")
+
+
+def _parse_sitemap(text: str) -> Tuple[List[str], List[str]]:
+    """(page_urls, child_sitemaps) from a sitemap or sitemap index. ([], []) on error."""
+    import xml.etree.ElementTree as ET
+    try:
+        root = ET.fromstring(text)
+    except Exception:
+        return [], []
+
+    def locs(node) -> List[str]:
+        out: List[str] = []
+        for child in node:
+            tag = child.tag.rsplit("}", 1)[-1].lower()
+            if tag == "loc" and (child.text or "").strip():
+                out.append(child.text.strip())
+        return out
+
+    urls: List[str] = []
+    children: List[str] = []
+    for node in root:
+        tag = node.tag.rsplit("}", 1)[-1].lower()
+        if tag == "sitemap":
+            children.extend(locs(node))
+        elif tag == "url":
+            urls.extend(locs(node))
+    return urls, children
+
+
+def _crawl_scope(path: str) -> Tuple[str, str]:
+    """(prefix, exact) for a path — the docs-subtree rule.
+
+    /docs/foo/bar    -> ("/docs/foo/bar/", "/docs/foo/bar")
+    /docs/guide.html -> ("/docs/", "")
+    /docs/widgets    -> ("/docs/widgets/", "/docs/widgets")
+    /                -> ("/", "")
+    """
+    if not path:
+        return "/", ""
+    if not path.startswith("/"):
+        path = "/" + path
+    if path.endswith("/"):
+        return path, ""
+    last = path.rsplit("/", 1)[-1]
+    if "." in last:
+        parent = path.rsplit("/", 1)[0]
+        return (parent + "/") if parent else "/", ""
+    return path + "/", path
+
+
+def _in_scope(url: str, host: str, prefix: str, exact: str) -> bool:
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except ValueError:
+        return False
+    if parsed.netloc.lower() != host:
+        return False
+    return parsed.path == exact or parsed.path.startswith(prefix)
+
+
+class _AnchorParser(HTMLParser):
+    """Collect <a href> values without a third-party HTML parser."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.hrefs: List[str] = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag.lower() != "a":
+            return
+        for name, value in attrs:
+            if name and name.lower() == "href" and value:
+                self.hrefs.append(value.strip())
+
+    handle_startendtag = handle_starttag
+
+
+def _links_from_html(html: str, base_url: str) -> List[str]:
+    """Same-document links, absolutised and fragment-stripped, in page order."""
+    parser = _AnchorParser()
+    try:
+        parser.feed(html or "")
+    except Exception:
+        pass
+    out: List[str] = []
+    seen: Set[str] = set()
+    for href in parser.hrefs:
+        if href.startswith(("#", "mailto:", "javascript:", "tel:")):
+            continue
+        try:
+            abs_url = urllib.parse.urljoin(base_url, href).split("#", 1)[0]
+        except ValueError:
+            continue
+        if abs_url and abs_url not in seen:
+            seen.add(abs_url)
+            out.append(abs_url)
+    return out
+
+
+def _map_mode(url: str, query: str) -> int:
+    """--map entry point. Prints one URL per line; 0 on success, 1 otherwise."""
+    if not is_valid_url(url):
+        print(f"MAP: invalid URL: {url}", file=sys.stderr)
+        return 1
+    cap = MAP_MAX_URLS
+    parsed = urllib.parse.urlparse(url)
+    scheme = parsed.scheme or "https"
+    host = (parsed.netloc or "").lower()
+    prefix, exact = _crawl_scope(parsed.path)
+    budget = [MAP_MAX_TOTAL_BYTES]
+
+    # 1) the URL itself when it is a sitemap; else 2) robots.txt Sitemap: lines;
+    # else 3) the two conventional sitemap paths.
+    candidates: List[str] = []
+    if _RE_SITEMAP_HINT.search(url) or url.lower().split("?", 1)[0].endswith((".xml", ".xml.gz")):
+        candidates = [url]
+    else:
+        robots = _map_fetch_doc(f"{scheme}://{host}/robots.txt", budget) or ""
+        for line in robots.splitlines():
+            if line.strip().lower().startswith("sitemap:"):
+                candidate = line.split(":", 1)[1].strip()
+                if candidate:
+                    candidates.append(candidate)
+        if not candidates:
+            candidates = [
+                f"{scheme}://{host}/sitemap.xml",
+                f"{scheme}://{host}/sitemap_index.xml",
+            ]
+
+    found: List[str] = []
+    queue = list(candidates)
+    seen_sitemaps: Set[str] = set()
+    fetched = 0
+    while queue and fetched < MAP_MAX_SITEMAPS and budget[0] > 0:
+        sitemap_url = queue.pop(0)
+        if sitemap_url in seen_sitemaps:
+            continue
+        seen_sitemaps.add(sitemap_url)
+        text = _map_fetch_doc(sitemap_url, budget)
+        fetched += 1
+        if not text:
+            continue
+        pages, children = _parse_sitemap(text)
+        found.extend(pages)
+        queue.extend(c for c in children if c not in seen_sitemaps)
+
+    label = "sitemap"
+
+    def scope_urls(raw_urls: List[str]) -> List[str]:
+        scoped_here: List[str] = []
+        seen_here: Set[str] = set()
+        for found_url in raw_urls:
+            found_url = found_url.split("#", 1)[0]
+            if found_url in seen_here or not _in_scope(found_url, host, prefix, exact):
+                continue
+            seen_here.add(found_url)
+            scoped_here.append(found_url)
+        return scoped_here
+
+    scoped = scope_urls(found)
+    if not scoped:
+        # 4) no sitemap coverage for THIS subtree (a root sitemap may only list
+        # section index pages): same-host links from the page itself.
+        label = "page links"
+        scoped = scope_urls(_links_from_html(_map_fetch_doc(url, budget) or "", url))
+
+    if query.strip():
+        # Keep ASCII tokens longer than 2 chars, plus any non-ASCII token
+        # (a CJK term is often one character but still meaningful).
+        tokens = [
+            t for t in re.findall(r"\w+", query.lower())
+            if len(t) > 2 or any(ord(c) > 127 for c in t)
+        ]
+        if tokens:
+            scored = []
+            for idx, found_url in enumerate(scoped):
+                path = urllib.parse.unquote(
+                    urllib.parse.urlparse(found_url).path
+                ).lower()
+                score = sum(1 for t in tokens if t in path)
+                if score:
+                    scored.append((-score, idx, found_url))
+            scoped = [u for _score, _idx, u in sorted(scored)]
+
+    if not scoped:
+        reason = "no URLs matched the query filter" if query.strip() else "no URLs found"
+        print(f"MAP: {reason} (scope {exact or prefix}* on {host})", file=sys.stderr)
+        return 1
+
+    shown = scoped[:cap]
+    print("\n".join(shown))
+    suffix = f" (showing {len(shown)} of {len(scoped)})" if len(scoped) > len(shown) else ""
+    print(f"MAP: {len(shown)} URLs from {label}{suffix} — scope {exact or prefix}* on {host}",
+          file=sys.stderr)
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# --cite: citers + references for one paper — no full text
+# ---------------------------------------------------------------------------
+
+# Fixed cap for both lists (no user-facing count flag).
+CITE_MAX_ITEMS: int = 25
+
+_RE_BARE_DOI = re.compile(r"^10\.\d{4,9}/\S+$")
+
+
+def _parse_cite_seed(seed: str) -> Tuple[str, str]:
+    """(kind, value) for a DOI / arXiv id / OpenAlex id. Raises ValueError."""
+    s = (seed or "").strip()
+    if not s:
+        raise ValueError("empty seed")
+    m = re.match(r"(?i)^(?:doi:\s*|https?://(?:dx\.)?doi\.org/)(\S+)$", s)
+    if m:
+        return "doi", urllib.parse.unquote(m.group(1))
+    m = re.match(r"(?i)^https?://(?:www\.)?arxiv\.org/(?:abs|pdf)/([^?#]+?)(?:\.pdf)?$", s)
+    if m:
+        return "arxiv", m.group(1)
+    m = re.match(r"(?i)^arxiv:\s*(\S+)$", s)
+    if m:
+        return "arxiv", m.group(1)
+    m = re.match(r"(?i)^https?://(?:www\.)?openalex\.org/(W\d+)$", s)
+    if m:
+        return "openalex", m.group(1).upper()
+    if re.match(r"(?i)^W\d+$", s):
+        return "openalex", s.upper()
+    if _RE_BARE_DOI.match(s):
+        return "doi", s
+    raise ValueError(
+        f"unrecognised seed (use a DOI, a doi.org/arXiv URL, or an OpenAlex W-id): {s}"
+    )
+
+
+def _openalex_url(path: str) -> str:
+    """OpenAlex API URL; adds the polite-pool mailto only when configured."""
+    url = "https://api.openalex.org" + path
+    mailto = os.environ.get("WEB_RESEARCH_OPENALEX_MAILTO", "").strip()
+    if mailto:
+        url += ("&" if "?" in url else "?") + "mailto=" + urllib.parse.quote(mailto)
+    return url
+
+
+def _json_get(url: str, timeout: int = 10, max_bytes: int = 4_000_000):
+    """JSON GET with the shared UA/byte cap. None unless the body is an object."""
+    raw = _http_get_bytes(url, timeout=timeout, max_bytes=max_bytes)
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw.decode("utf-8", errors="replace"))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _openalex_work(kind: str, value: str) -> Optional[dict]:
+    """OpenAlex work record for a DOI / OpenAlex id / arXiv id (via its DOI)."""
+    if kind == "openalex":
+        return _json_get(_openalex_url(f"/works/{value}"))
+    if kind == "doi":
+        return _json_get(
+            _openalex_url("/works/https://doi.org/" + urllib.parse.quote(value, safe="/"))
+        )
+    if kind == "arxiv":
+        doi = f"10.48550/arXiv.{value}"
+        return _json_get(
+            _openalex_url("/works/https://doi.org/" + urllib.parse.quote(doi, safe="/"))
+        )
+    return None
+
+
+def _cite_items(works: Optional[List[dict]]) -> List[Tuple[str, str, str, str]]:
+    """(title, year, doi, openalex_id) tuples, untitled entries kept."""
+    items: List[Tuple[str, str, str, str]] = []
+    for work in works or []:
+        if not isinstance(work, dict):
+            continue
+        title = " ".join((work.get("title") or work.get("display_name") or "").split())
+        title = title or "(untitled)"
+        year = work.get("publication_year") or ""
+        doi = (work.get("doi") or "").replace("https://doi.org/", "")
+        oid = (work.get("id") or "").rsplit("/", 1)[-1]
+        items.append((title, str(year) if year else "", doi, oid))
+    return items
+
+
+def _openalex_citers(work_id: str, limit: int) -> Optional[List[dict]]:
+    data = _json_get(_openalex_url(
+        f"/works?filter=cites:{work_id}&per-page={min(limit, 200)}"
+        f"&sort=cited_by_count:desc&select=title,publication_year,doi,id"
+    ))
+    if data is None:
+        return None
+    return data.get("results") or []
+
+
+def _openalex_references(ref_ids: List[str], limit: int) -> Optional[List[dict]]:
+    """Newest referenced works, batched 25 ids per request (OpenAlex pipe-OR).
+
+    Fetches at least 50 ids (so "newest N" is drawn from a real sample, not an
+    arbitrary first N) and at most 100 — citation lists can run to hundreds and
+    the display is capped anyway. None when every request failed (distinct from
+    an empty result).
+    """
+    out: List[dict] = []
+    ids = ref_ids[:min(len(ref_ids), max(limit, 50), 100)]
+    answered = False
+    for start in range(0, len(ids), 25):
+        chunk = ids[start:start + 25]
+        data = _json_get(_openalex_url(
+            "/works?filter=openalex_id:" + "|".join(chunk)
+            + f"&per-page={len(chunk)}&select=title,publication_year,doi,id"
+        ))
+        if data is not None:
+            answered = True
+            out.extend(data.get("results") or [])
+    if ids and not answered:
+        return None
+    out.sort(key=lambda w: (w.get("publication_year") or 0), reverse=True)
+    return out[:limit]
+
+
+def _s2_identifier(kind: str, value: str) -> str:
+    if kind == "doi":
+        return f"DOI:{value}"
+    if kind == "arxiv":
+        return f"ARXIV:{value}"
+    return ""
+
+
+def _s2_citers(kind: str, value: str, limit: int) -> List[dict]:
+    """Semantic Scholar citers as OpenAlex-shaped dicts. One 429 retry."""
+    ident = _s2_identifier(kind, value)
+    if not ident:
+        return []
+    url = (
+        "https://api.semanticscholar.org/graph/v1/paper/"
+        + urllib.parse.quote(ident, safe=":")
+        + f"/citations?fields=title,year,externalIds&limit={min(limit, 100)}"
+    )
+    for attempt in (1, 2):
+        data = _json_get(url, timeout=12)
+        if data is not None:
+            items = []
+            for entry in data.get("data") or []:
+                paper = (entry or {}).get("citingPaper") or {}
+                if not paper:
+                    continue
+                doi = ((paper.get("externalIds") or {}).get("DOI") or "")
+                items.append({
+                    "title": paper.get("title") or "(untitled)",
+                    "publication_year": paper.get("year") or "",
+                    "doi": f"https://doi.org/{doi}" if doi else "",
+                    "id": "",
+                })
+            return items
+        if attempt == 1:
+            time.sleep(2)
+    return []
+
+
+def _s2_seed(kind: str, value: str) -> Optional[dict]:
+    """Seed metadata from Semantic Scholar when OpenAlex has no record."""
+    ident = _s2_identifier(kind, value)
+    if not ident:
+        return None
+    data = _json_get(
+        "https://api.semanticscholar.org/graph/v1/paper/"
+        + urllib.parse.quote(ident, safe=":")
+        + "?fields=title,year,externalIds,citationCount"
+    )
+    return data or None
+
+
+def _cite_line(title: str, year: str, doi: str, oid: str) -> str:
+    link = f"https://doi.org/{doi}" if doi else (f"https://openalex.org/{oid}" if oid else "")
+    year_part = f" ({year})" if year else ""
+    return f"- {title}{year_part}" + (f" — {link}" if link else "")
+
+
+def _cite_mode(seed: str) -> int:
+    """--cite entry point. Prints citers + references; 0 on success, 1 otherwise."""
+    try:
+        kind, value = _parse_cite_seed(seed)
+    except ValueError as exc:
+        print(f"CITE: {exc}", file=sys.stderr)
+        return 1
+    cap = CITE_MAX_ITEMS
+
+    work = _openalex_work(kind, value)
+    if not work:
+        # No OpenAlex record: Semantic Scholar can still give seed + citers.
+        s2_seed = _s2_seed(kind, value)
+        if not s2_seed:
+            print(
+                "CITE: seed not resolved — no OpenAlex record, and the Semantic "
+                f"Scholar lookup failed or returned nothing: {seed}",
+                file=sys.stderr,
+            )
+            return 1
+        doi = ((s2_seed.get("externalIds") or {}).get("DOI") or "")
+        year = str(s2_seed.get("year") or "")
+        title = " ".join((s2_seed.get("title") or "").split()) or "(untitled)"
+        citers = _cite_items(_s2_citers(kind, value, cap))
+        print(f"SEED: {title}{f' ({year})' if year else ''}"
+              + (f" — https://doi.org/{doi}" if doi else ""))
+        print(f"CITERS ({len(citers)} of {s2_seed.get('citationCount') or len(citers)}) [Semantic Scholar]")
+        for item in citers:
+            print(_cite_line(*item))
+        print("REFERENCES (0) [unavailable for this seed — no OpenAlex record]")
+        return 0
+
+    seed_title = " ".join((work.get("title") or "").split()) or "(untitled)"
+    seed_year = str(work.get("publication_year") or "")
+    seed_doi = (work.get("doi") or "").replace("https://doi.org/", "")
+    work_id = (work.get("id") or "").rsplit("/", 1)[-1]
+    total_citers = work.get("cited_by_count") or 0
+    ref_ids = [u.rsplit("/", 1)[-1] for u in (work.get("referenced_works") or []) if u]
+
+    citers_raw = _openalex_citers(work_id, cap)
+    provider = "OpenAlex"
+    citers_failed = citers_raw is None
+    if not citers_raw and kind in ("doi", "arxiv"):
+        s2_raw = _s2_citers(kind, value, cap)
+        if s2_raw:
+            citers_raw, provider, citers_failed = s2_raw, "Semantic Scholar", False
+    citers = _cite_items(citers_raw)
+
+    print(f"SEED: {seed_title}{f' ({seed_year})' if seed_year else ''}"
+          + (f" — https://doi.org/{seed_doi}" if seed_doi else ""))
+    citer_label = "request failed" if citers_failed else provider
+    print(f"CITERS ({len(citers)} of {total_citers}) [{citer_label}]")
+    for item in citers:
+        print(_cite_line(*item))
+
+    refs_raw = _openalex_references(ref_ids, cap)
+    if refs_raw is None:
+        print(f"REFERENCES (0 of {len(ref_ids)}) [OpenAlex — request failed]")
+    else:
+        refs = _cite_items(refs_raw)
+        print(f"REFERENCES ({len(refs)} of {len(ref_ids)}) [OpenAlex]")
+        for item in refs:
+            print(_cite_line(*item))
+    return 0
+
+
+def run_research(config: ResearchConfig, status: Optional[dict] = None) -> Optional[List[FetchResult]]:
     """Execute research and output results."""
     _reset_scholarly_budget()
     progress = ProgressReporter(quiet=config.quiet)
+    status = {} if status is None else status
 
     # Batch mode: collect all results, then format
     results: List[FetchResult] = []
@@ -4192,7 +4889,7 @@ def run_research(config: ResearchConfig) -> Optional[List[FetchResult]]:
 
     async def collect_async():
         try:
-            async for result in run_research_async(config, progress):
+            async for result in run_research_async(config, progress, status=status):
                 results.append(result)
         finally:
             _shutdown_extract_pool()
@@ -4231,8 +4928,11 @@ def main() -> None:
         epilog="""
 Examples:
   python web_research.py "Mac Studio M3 Ultra LLM performance"
+  python web_research.py "rust release notes" --since y   # Optional: last year only
   python web_research.py --url https://example.com   # Fetch one URL: full page saved to a report file, path printed
   python web_research.py --url https://example.com --no-render  # Pure static fetch (no browser)
+  python web_research.py --map https://docs.python.org/3/library/  # List URLs in that subtree
+  python web_research.py --cite 10.1038/s41586-020-2649-2  # Citers + references for a paper
 
 Search: DuckDuckGo (static, no API key)
 Fetch: Scrapling AsyncFetcher (TLS fingerprinting); failed or gated fetches are retried with real Google Chrome (the --url-chrome tier, provisioned into tmp/browser/chrome)
@@ -4257,6 +4957,12 @@ Structured sources: RSS/Atom feeds, Hacker News threads, arXiv full text, PDFs (
                         help="Enable medical bonus sources (PubMed, Europe PMC, OpenAlex)")
     parser.add_argument("--tech", action="store_true",
                         help="Enable tech bonus sources (Hacker News, Stack Overflow, Dev.to, GitHub)")
+    parser.add_argument("--since", choices=("d", "w", "m", "y"),
+                        help="Restrict results to the last day/week/month/year (engine time window; optional, trades recall for recency)")
+    parser.add_argument("--map", metavar="URL",
+                        help="List URLs on a site or subtree (sitemap, else page links). Optional query filters by path. Lists only — fetch with --url")
+    parser.add_argument("--cite", metavar="SEED",
+                        help="Citation graph for one paper: citers + references. Seed: DOI, doi.org/arXiv URL, or OpenAlex W-id")
     parser.add_argument("--quality", action="store_true",
                         help="Include output quality analysis (with --usage)")
 
@@ -4265,6 +4971,33 @@ Structured sources: RSS/Atom feeds, Hacker News threads, arXiv full text, PDFs (
     if args.usage or args.quality:
         print_usage_stats(quality=args.quality)
         sys.exit(0)
+
+    # Exactly one data mode. --since is a search-mode modifier only.
+    if sum(1 for m in (args.url, args.map, args.cite) if m) > 1:
+        parser.error("use only one of --url, --map, --cite")
+    if args.since and (args.url or args.map or args.cite):
+        parser.error("--since applies to search mode only")
+
+    if args.map:
+        _t0 = time.monotonic()
+        code = _map_mode(args.map, args.query or "")
+        log_usage({
+            "query": args.map, "mode": "map",
+            "urls_fetched": 0, "content_chars": 0,
+            "ok": code == 0, "error": None if code == 0 else "failed",
+            "ms": int((time.monotonic() - _t0) * 1000), "timeout": False,
+        })
+        sys.exit(code)
+    if args.cite:
+        _t0 = time.monotonic()
+        code = _cite_mode(args.cite)
+        log_usage({
+            "query": args.cite, "mode": "cite",
+            "urls_fetched": 0, "content_chars": 0,
+            "ok": code == 0, "error": None if code == 0 else "failed",
+            "ms": int((time.monotonic() - _t0) * 1000), "timeout": False,
+        })
+        sys.exit(code)
 
     # URL-fetch mode: ONE URL per invocation. Fetch the page in FULL (no char
     # cap), save it RAW (quality filters OFF, full-document DOM text — every
@@ -4402,6 +5135,7 @@ Structured sources: RSS/Atom feeds, Hacker News threads, arXiv full text, PDFs (
             scientific=args.sci,
             medical=args.med,
             tech=args.tech,
+            since=args.since or "",
         )
 
     # Hard wall-clock timeout: kill the entire process after WALL_TIMEOUT.
@@ -4432,7 +5166,8 @@ Structured sources: RSS/Atom feeds, Hacker News threads, arXiv full text, PDFs (
         # Single query: original behavior
         config = make_config(queries[0])
         t0 = time.monotonic()
-        results = run_research(config)
+        search_status: dict = {}
+        results = run_research(config, search_status)
         ok = [r for r in (results or []) if r.success]
         # Telemetry fields are computed from the PRE-filter fetch results
         # (unchanged semantics); only "ok" below reflects post-filter survival.
@@ -4476,7 +5211,7 @@ Structured sources: RSS/Atom feeds, Hacker News threads, arXiv full text, PDFs (
         })
         if pages:
             report_path = _report_dir() / f"{_make_run_id(config.query)}.txt"
-            digest, report_content = _assemble_report(config.query, pages, failures, report_path, quality_stats)
+            digest, report_content = _assemble_report(config.query, pages, failures, report_path, quality_stats, since=config.since)
             if _write_report_file(report_path, report_content):
                 print(digest)
                 # Redundant path on stderr: harnesses capture both streams, and
@@ -4499,7 +5234,16 @@ Structured sources: RSS/Atom feeds, Hacker News threads, arXiv full text, PDFs (
             print(f"No results: all {len(results)} fetched pages failed", file=sys.stderr)
             sys.exit(1)
         else:
-            print("No results found", file=sys.stderr)
+            attempts = search_status.get("search_attempts", 1)
+            err = search_status.get("search_error")
+            if attempts > 1 or err:
+                print(
+                    f"No results: search backend returned 0 URLs after {attempts} attempt(s)"
+                    + (f" ({err})" if err else ""),
+                    file=sys.stderr,
+                )
+            else:
+                print("No results found", file=sys.stderr)
             sys.exit(1)
 
     except KeyboardInterrupt:
