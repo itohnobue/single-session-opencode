@@ -2489,9 +2489,10 @@ async def _maybe_escalate(
 ) -> FetchResult:
     """Escalation ladder: retry a static failure once with the real browser.
 
-    Used by --url mode: retry-worthy failures (HTTP 403/429/5xx, CAPTCHA,
-    Timeout and Too short) get one browser retry, budget-capped. Search mode
-    never calls this (static-only by design, per module docstring item 7).
+    Used by --url mode -- and by BOTH modes for the optional DeepSeek fetch
+    retry. In --url, retry-worthy failures (HTTP 403/429/5xx, CAPTCHA, Timeout
+    and Too short) get one browser retry, budget-capped; search mode passes
+    render="off", so only the DeepSeek branch runs there.
     Non-retry-worthy failures (404, DNS, PDF...) return unchanged. The browser
     tier is provisioned on first use by the --url preflight, which runs before the
     wall-clock block — `_BROWSER_TIER_READY` False means that provisioning failed,
@@ -2509,6 +2510,8 @@ async def _maybe_escalate(
     429/5xx, CAPTCHA). DNS, connect, TLS and timeout failures behave the same
     in a browser, so the static result stands for those.
     """
+    # Set when the DeepSeek retry also fails; the failure record then keeps BOTH reasons.
+    deepseek_failure = ""
     if deepseek and not result.success and _deepseek_url_error(result.error or ""):
         global _DEEPSEEK_FETCH_ATTEMPTS
         _DEEPSEEK_FETCH_ATTEMPTS += 1
@@ -2519,10 +2522,21 @@ async def _maybe_escalate(
             if progress:
                 progress.url_result(url, True, elapsed, "")
             return ds_result
-        # DeepSeek failed: Chrome is the last step, but only where it can help.
+        # DeepSeek failed too: the static error alone would hide why the retry did
+        # not rescue the page (HTTP 429, 404, no content, too short, API timeout).
+        deepseek_failure = (
+            f"{result.error or 'unknown error'} "
+            f"(DeepSeek: {ds_result.error or 'unknown error'})"
+        )
+        if progress:
+            progress.message(f"  [deepseek] fetch failed ({ds_result.error}) — not rescued")
+        # Chrome is the last step, but only where it can help.
         if (result.error or "") not in BROWSER_AFTER_DEEPSEEK_ERRORS:
+            # The caller reports this object's error (report NOTES, --url stderr):
+            # without this the DeepSeek reason never leaves the progress record.
+            result.error = deepseek_failure
             if progress:
-                progress.url_result(url, result.success, elapsed, result.error or "")
+                progress.url_result(url, False, elapsed, deepseek_failure)
             return result
         # Fall through to the browser branch below for the clearable walls.
     if render == "auto" and _BROWSER_TIER_READY is not False:
@@ -2537,9 +2551,18 @@ async def _maybe_escalate(
             )
             if (browser_result and browser_result.success
                     and len(browser_result.content or "") >= min_content_length):
+                if progress:
+                    progress.url_result(url, True, elapsed, "")
                 return browser_result
+    if deepseek_failure:
+        # Both retries failed: keep the full reason in the failure record the
+        # caller reports, not just in the progress line.
+        result.error = deepseek_failure
     if progress:
-        progress.url_result(url, result.success, elapsed, result.error or "")
+        progress.url_result(
+            url, result.success, elapsed,
+            deepseek_failure or (result.error or ""),
+        )
     return result
 
 
