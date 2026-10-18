@@ -60,8 +60,12 @@ set /a WAITED=0
 ping -n 6 127.0.0.1 >nul 2>nul
 call :detect_chrome
 if not "%CHROME_OK%"=="0" goto :chrome_ready
+REM The lock holder died: waiting the full timeout would be pointless.
+if not exist "%CHROME_LOCK%" goto :takeover
 set /a WAITED+=5
 if %WAITED% LSS 600 goto :waitforchrome
+
+:takeover
 REM The lock holder failed or died: reclaim the stale lock and take over once.
 rmdir "%CHROME_LOCK%" 2>nul
 mkdir "%CHROME_LOCK%" 2>nul
@@ -147,12 +151,12 @@ REM tmp\browser\chrome only on success: an interrupted extraction must never lea
 REM a payload that passes the readiness check. Anything already downloaded is reused.
 REM Verified chain, 2026-10-01.
 if not exist "%SEVENZ%" (
-    echo Downloading 7-Zip standalone (7zr.exe) ...
+    echo Downloading 7-Zip standalone ^(7zr.exe^) ...
     call :download "https://www.7-zip.org/a/7zr.exe" "%SEVENZ%"
 )
 if not exist "%SEVENZ%" exit /b 1
 if not exist "%CHROME_SETUP%" (
-    echo Downloading the Google Chrome offline installer (one-time, ~160MB) ...
+    echo Downloading the Google Chrome offline installer ^(one-time, ~160MB^) ...
     call :download "https://dl.google.com/chrome/install/ChromeStandaloneSetup64.exe" "%CHROME_SETUP%"
 )
 if not exist "%CHROME_SETUP%" exit /b 1

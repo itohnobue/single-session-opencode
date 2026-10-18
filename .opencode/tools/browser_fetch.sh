@@ -74,7 +74,13 @@ chrome_ok() { local e; e="$(chrome_exe)"; [ -n "$e" ] && [ -x "$e" ]; }
 # chrome_ok only proves the file exists; this proves it actually launches.
 chrome_runnable() {
     local e; e="$(chrome_exe)"
-    [ -n "$e" ] && [ -x "$e" ] && "$e" --version >/dev/null 2>&1
+    if [ -z "$e" ] || [ ! -x "$e" ]; then return 1; fi
+    # Windows payload: chrome.exe --version prints nothing and opens a real browser
+    # window under the user's profile instead — never launch it just to probe.
+    case "$(uname -s)" in
+        MINGW*|MSYS*|CYGWIN*) return 0 ;;
+    esac
+    "$e" --version >/dev/null 2>&1
 }
 
 install_chrome_deps() {

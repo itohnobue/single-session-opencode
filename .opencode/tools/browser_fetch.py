@@ -138,6 +138,27 @@ def _provisioned_chrome() -> Path | None:
     return None
 
 
+def _payload_version(candidate: Path) -> str | None:
+    """Chrome's version read from the payload layout — never by launching the browser.
+
+    `chrome.exe --version` prints nothing on Windows: the switch opens a real browser
+    window, and without `--user-data-dir` it picks up the user's own profile. The
+    payload nests a version-named directory beside (or above) chrome.exe, so the
+    version is taken from that path segment instead.
+    """
+    name_re = re.compile(r"^\d+\.\d+\.\d+\.\d+$")
+    base = candidate.parent
+    if name_re.match(base.name):
+        return base.name
+    try:
+        versions = [p.name for p in base.iterdir() if p.is_dir() and name_re.match(p.name)]
+    except OSError:
+        return None
+    if not versions:
+        return None
+    return sorted(versions, key=lambda v: [int(x) for x in v.split(".")], reverse=True)[0]
+
+
 def _engine() -> dict:
     """The only browser we run: the repo-local real Google Chrome (tmp/browser/chrome).
 
@@ -152,21 +173,32 @@ def _engine() -> dict:
         raise RuntimeError(
             "no provisioned Google Chrome in tmp/browser/chrome (a system browser is "
             "never used; the wrapper installs the payload on first use)")
-    try:
-        out = subprocess.run([str(candidate), "--version"], capture_output=True,
-                             text=True, timeout=20)
-        m = re.search(r"(\d+)\.\d+\.\d+\.\d+", out.stdout + out.stderr)
-        if m:
+    if _platform.system() == "Windows":
+        # Never launch the payload here: --version prints nothing on Windows and
+        # opens a real browser window under the user's profile.
+        version = _payload_version(candidate)
+        if version:
             return {"path": str(candidate), "name": "Chrome", "origin": "tmp",
-                    "major": m.group(1)}
-        detail = (out.stderr or out.stdout or "").strip().splitlines()
-        reason = detail[0][:160] if detail else f"exit status {out.returncode}"
-    except Exception as exc:  # noqa: BLE001
-        reason = f"{type(exc).__name__}: {exc}"[:160]
+                    "major": version.split(".")[0]}
+        reason = "no versioned directory found in the payload"
+    else:
+        try:
+            out = subprocess.run([str(candidate), "--version"], capture_output=True,
+                                 text=True, timeout=20)
+            m = re.search(r"(\d+)\.\d+\.\d+\.\d+", out.stdout + out.stderr)
+            if m:
+                return {"path": str(candidate), "name": "Chrome", "origin": "tmp",
+                        "major": m.group(1)}
+            detail = (out.stderr or out.stdout or "").strip().splitlines()
+            reason = detail[0][:160] if detail else f"exit status {out.returncode}"
+        except Exception as exc:  # noqa: BLE001
+            reason = f"{type(exc).__name__}: {exc}"[:160]
+    hint = ("re-provision the payload with browser_fetch.bat --ensure"
+            if _platform.system() == "Windows" else
+            "on Linux its system libraries are likely missing; run browser_fetch.sh "
+            "--ensure to reinstall them")
     raise RuntimeError(
-        f"Google Chrome at {candidate} is present but failed to start ({reason}) — on "
-        "Linux its system libraries are likely missing; run browser_fetch.sh --ensure "
-        "to reinstall them")
+        f"Google Chrome at {candidate} is present but unusable ({reason}) — {hint}")
 
 
 def _realistic_ua(major: str) -> str:
