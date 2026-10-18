@@ -26,6 +26,7 @@ The shipped `opencode.json` allows all operations by default. Delete or tweak it
   - **T2 — researched executor** — `prepare-agent` ALWAYS researches the task's technologies into a full research report + compact digest that the executor carries as its briefing (the spawn is mandatory).
   - **T3 — full workflow** — for any complex issue, always researched (mandatory prepare at issue start): review agents gather research + discovery + review → research-backed second opinion at MEDIUM+ → adversarial verification → fixes.
 - **Continuation handoff** — a fixed 8-section carry-over so a fresh agent or later session resumes without re-discovery: R3 run retirement uses it automatically, and `/handoff` checkpoints a session on demand.
+- **Compaction handoff (V2)** — compaction writes the same 8-section handoff to `.opencode/handoff/` and prompts a workspace check on the next turn.
 - **Memory that survives** — two-tier knowledge/session memory via `memory.sh`.
 
 ### Optional: DeepSeek search
