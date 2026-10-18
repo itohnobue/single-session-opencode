@@ -122,18 +122,8 @@ main() {
   if [[ -d "$target/.opencode" ]]; then
     warn ".opencode/ directory already exists in target"
     printf '  Synchronizing suite files to the current version...\n'
-    # Remove stale agent definitions: agent .md files not shipped by the suite
-    # (e.g. leftovers from the old 109-agent version) are removed.
-    for stale in "$target/.opencode/agents"/*.md; do
-      [[ -e "$stale" ]] || continue
-      base="${stale##*/}"
-      if [[ ! -f "$SCRIPT_DIR/.opencode/agents/$base" ]]; then
-        rm -f "$stale"
-        printf '  Removed stale agent: %s\n' "$base"
-      fi
-    done
-    # Copy all suite files, overwriting previous versions (agents, templates,
-    # tools). User-created files outside the suite are kept.
+    # Copy all suite files, overwriting previous versions; user-created files
+    # are never deleted.
     cp -R "$SCRIPT_DIR/.opencode/." "$target/.opencode/"
     info "Synchronized .opencode/ to the current suite version"
   else

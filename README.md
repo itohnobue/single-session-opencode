@@ -11,7 +11,7 @@ cd single-session-opencode
 # or: .\install.ps1 C:\path\to\project   (Windows)
 ```
 
-The installer copies `.opencode/` (agents, tools, templates, skills, plugin), `AGENTS.md`, and a minimal `opencode.json` into your project — an existing `AGENTS.md` or `opencode.json` is never overwritten. Open the project with OpenCode and the suite is active.
+The installer copies `.opencode/` (agents, tools, templates, skills, plugin), `AGENTS.md`, and a minimal `opencode.json` into your project — re-running overwrites `.opencode/` suite files, never an existing `AGENTS.md` or `opencode.json`. Open the project with OpenCode and the suite is active.
 
 ## Default allowance
 

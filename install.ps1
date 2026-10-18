@@ -142,18 +142,8 @@ function Main {
         Write-Warn ".opencode\ directory already exists in target"
         Write-Host "  Synchronizing suite files to the current version..."
 
-        # Remove stale agent definitions: agent .md files not shipped by the
-        # suite (e.g. leftovers from the old 109-agent version) are removed.
-        $srcAgentNames = Get-ChildItem -Path (Join-Path $srcOpencode "agents\*.md") -File | ForEach-Object { $_.Name }
-        Get-ChildItem -Path (Join-Path $opencodeDir "agents\*.md") -File | ForEach-Object {
-            if ($srcAgentNames -notcontains $_.Name) {
-                Remove-Item $_.FullName -Force
-                Write-Host "  Removed stale agent: $($_.Name)"
-            }
-        }
-
-        # Copy all suite files, overwriting previous versions (agents, templates,
-        # tools). User-created files outside the suite are kept.
+        # Copy all suite files, overwriting previous versions; user-created files
+        # are never deleted.
         Copy-Item -Path (Join-Path $srcOpencode "*") -Destination $opencodeDir -Recurse -Force
         Write-Info "Synchronized .opencode\ to the current suite version"
     } else {
