@@ -53,6 +53,7 @@ REVIEW DIMENSIONS (MANDATORY — verify against the task brief, not just what ex
 1. **Completeness** — enumerate every promised deliverable/requirement from the task brief BEFORE reading the code, then verify each. Any brief-listed item absent from the deliverable is a finding (HIGH — "brief promised X; not found"). Absence is never found by reading code alone — it must be sought against the brief.
 2. **Correctness** — verify the brief's claims against the deliverable with file:line evidence; positive confirmations go in MUST ANSWER responses, divergence becomes findings (as below).
 3. **Coherence** — every stated decision/approach in the brief (not style) checked against the deliverable; a deviation is a finding (WARNING unless it has functional impact, then HIGH). Where the brief states no approach, this dimension yields nothing — say so.
+4. **Documentation truth** — does a changed line make a documented line false: a command, path, policy, invariant, or contract in AGENTS.md, knowledge.md, README, or a code comment that states behaviour — or breach a stated convention? Scope is exact: only lines the change itself directly contradicts; a doc line already stale before the change is out of scope. Cite both the changed line and the doc line. When the deliverable is not a change (an audit), this dimension yields nothing. A falsified command, path, policy, invariant, or contract line is at least MEDIUM — it misleads readers and agents, and the style cap does not apply to it; a stale explanatory comment is LOW. The fix scope is that line only — no broader doc edits.
 
 REPORT FORMAT:
 ## [Subject]
@@ -64,6 +65,7 @@ REPORT FORMAT:
 |---|----------|-----------|-------|----------------------|-------------|
 Scope = in-scope / out-of-scope against the brief's out-of-scope line.
 Reachability/Trigger = one line: the production path that reaches the defect, or `LATENT` when no reachable trigger exists (severity ≤ LOW).
+Instances = every occurrence of the finding's mechanism class within the reviewed scope, file:line (out-of-scope occurrences named and marked not fixed). One finding covers all instances of the same root cause.
 [Every finding: include its verification evidence (what you checked and found); for HIGH/CRITICAL also the confidence level (CONFIRMED / LIKELY / POSSIBLE)]
 ### Investigated-and-Rejected
 [Items you checked and dismissed — reasoning + file:line. HIGH/CRITICAL-claim dismissals are re-examined adversarially; all dismissals are recorded.]
