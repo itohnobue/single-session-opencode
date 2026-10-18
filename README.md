@@ -20,7 +20,7 @@ The shipped `opencode.json` allows all operations by default. Delete or tweak it
 ## How it works
 
 - **One session, one worker** — the model reads, writes, runs, and verifies, all in dialog with you. You can interject or redirect at any moment.
-- **Search-first** — when the answer depends on external facts (versions, APIs, docs), the model searches the web instead of guessing. Memory-only answers are the exception.
+- **Reports first, then search** — when the answer depends on external facts (versions, APIs, docs), the model checks the reports this session already produced and searches only the gap. Memory-only answers are the exception.
 - **Tiered delegation** — big/heavy/context-hungry work goes to subagents in three tiers. Delegation is judgment, not a pipeline:
   - **T1 — plain executor** — task context is the briefing, no research. Use only when the task file carries every fact.
   - **T2 — researched executor** — `prepare-agent` ALWAYS researches the task's technologies into a full research report + compact digest that the executor carries as its briefing (the spawn is mandatory).
@@ -30,7 +30,7 @@ The shipped `opencode.json` allows all operations by default. Delete or tweak it
 
 ### Optional: DeepSeek search
 
-`web_search.sh` can also query DeepSeek's in-house search index alongside DuckDuckGo — 20 extra pages per query, or 40 when DuckDuckGo is unavailable. Results land in the same report. Off by default; enable it in your shell:
+`web_search.sh` can also query DeepSeek's in-house search index alongside DuckDuckGo — 20 extra pages per query, or 50 when DuckDuckGo is unavailable. DeepSeek returns each page's content with the search response, so those pages are written to the report without a local fetch. Off by default; enable it in your shell:
 
 ```bash
 export WEB_RESEARCH_DEEPSEEK=1

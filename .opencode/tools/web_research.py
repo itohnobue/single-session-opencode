@@ -46,18 +46,15 @@ Unified tool combining search and fetch into a single optimized workflow:
 10. --cite SEED: citers + references for one paper (DOI, doi.org/arXiv URL or
    OpenAlex id), 25 per section, OpenAlex with a Semantic Scholar fallback.
 11. Optional DeepSeek backend (WEB_RESEARCH_DEEPSEEK=1, off by default): its
-   in-house search runs alongside DuckDuckGo and contributes 20 pages, or 40
-   when DuckDuckGo returns nothing. Results merge into the same report
-   format — the backend is invisible downstream. Key comes from the user's
-   OpenCode config (DEEPSEEK_API_KEY overrides). DeepSeek Fetch then covers
-   any page this machine cannot reach (DNS, connect, timeout, TLS) or that
-   answers with an access wall: in --url mode it replaces the browser retry
-   for that failure class, and when that fetch also fails Chrome runs as the
-   last step for walls it can clear (403/418/429/5xx, CAPTCHA) — DNS,
-   connect, TLS and timeout failures return the static result; in search mode
-   the same rule turns a failed page into a DeepSeek fetch (paced below the
-   account's 5 QPS, one retry on 429) and the page joins the report like any
-   other.
+   in-house search runs alongside DuckDuckGo and contributes 20 pages, or 50
+   when DuckDuckGo returns nothing. Key comes from the user's OpenCode
+   config (DEEPSEEK_API_KEY overrides). Every search request asks for page
+   content (need_content): a result that comes back with content is written
+   into the report as-is and is NEVER fetched by this machine; a result
+   without usable content falls back to the ordinary fetch path. DDG results
+   are always fetched by this machine, exactly as without the backend. PDF
+   results stay in the PDF LINKS block, and a PDF that came back with
+   content is listed as a page too (never downloaded).
 
 Usage:
     python web_research.py "search query"
@@ -67,8 +64,9 @@ Usage:
     python web_research.py --map https://example.com/docs/   # List URLs in that path subtree
     python web_research.py --cite 10.1038/s41586-020-2649-2  # Citers + references for a paper
 
-(fixed tuned settings: request up to 30 results, fetch up to 20 pages — 40 with
-the DeepSeek backend — plain-text output)
+(fixed tuned settings: request up to 50 results, fetch up to 20 pages,
+plain-text output; with the DeepSeek backend its 20/50 result pages arrive with
+their content and are not fetched here)
 """
 
 from __future__ import annotations
@@ -354,56 +352,8 @@ BROWSER_RETRY_ERRORS: frozenset = frozenset({
     "CAPTCHA/blocked", "Timeout", "Too short",
 })
 
-# --url fallback: failure classes where DeepSeek Fetch takes over from the
-# browser tier. These are pages this machine cannot reach (DNS, connect,
-# timeout, TLS) or server-side access walls a local browser would not clear.
-# "Too short" is deliberately absent: a JS shell is exactly what the browser
-# CAN solve, so it stays on the browser path.
-DEEPSEEK_FETCH_ERRORS: frozenset = frozenset({
-    "HTTP 401", "HTTP 403", "HTTP 405", "HTTP 406", "HTTP 418", "HTTP 429",
-    "HTTP 451", "CAPTCHA/blocked", "Timeout",
-})
-DEEPSEEK_FETCH_ERROR_HINTS: tuple = (
-    "dns", "connect", "timeout", "timed out", "refused", "unreachable",
-    "getaddrinfo", "nodename", "ssl", "tls", "reset by peer", "proxy",
-)
-
-# After a failed DeepSeek fetch, Chrome is the last step — but only for walls a
-# local browser could actually clear (403/418/429/5xx, CAPTCHA). DNS, connect,
-# TLS and timeout failures are identical in a browser, so they return the
-# static result instead of launching Chrome for nothing.
-BROWSER_AFTER_DEEPSEEK_ERRORS: frozenset = frozenset(
-    BROWSER_RETRY_ERRORS - {"Timeout", "Too short"}
-)
-
-
-def _deepseek_url_error(error: str) -> bool:
-    """True when a page-fetch failure is one DeepSeek Fetch takes over for.
-
-    Applies to --url and to individual page fetches in a search run. Covers the
-    fixed error codes plus 5xx and the free-form network errors that arrive
-    through the generic exception path (`str(e)[:50]`: ConnectError,
-    "[Errno 8] nodename nor servname…", TLS errors). A clean 404/410 stays a
-    real "gone" — the page does not exist, no other egress will change that.
-    """
-    err = (error or "").strip()
-    if not err:
-        return False
-    if err in DEEPSEEK_FETCH_ERRORS:
-        return True
-    match = re.fullmatch(r"HTTP (\d{3})", err)
-    if match:
-        code = int(match.group(1))
-        return code >= 500 or code in {401, 403, 405, 406, 418, 429, 451}
-    low = err.lower()
-    return any(hint in low for hint in DEEPSEEK_FETCH_ERROR_HINTS)
-
 # Per-run browser-escalation counter (search mode only; reset at run start).
 _BROWSER_ESCALATIONS: int = 0
-
-# Per-run DeepSeek fetch counter (attempts, including ones that fail and hand
-# the original static result back — telemetry only).
-_DEEPSEEK_FETCH_ATTEMPTS: int = 0
 
 # =============================================================================
 # SMART CONTENT FILTERS (tunable)
@@ -636,7 +586,7 @@ class ResearchConfig:
     quiet: bool = False
     min_content_length: int = 600
     max_concurrent: int = 50  # Match default search count
-    search_results: int = 30
+    search_results: int = 50
     scientific: bool = False
     medical: bool = False
     tech: bool = False
@@ -670,8 +620,25 @@ class FetchResult:
     # Publication date for the digest (informational only — the recency filter
     # F7 keeps its own parsing and does NOT consume these fields). ISO day.
     date: str = ""
-    # Provenance of `date`: "meta" | "jsonld" | "visible" | "url" | "modified".
+    # Provenance of `date`: "meta" | "jsonld" | "visible" | "url" | "modified"
+    # | "deepseek" (date supplied by the search backend).
     date_source: str = ""
+
+
+@dataclass
+class PageJob:
+    """One page the run may deliver, before it becomes a FetchResult.
+
+    A plain URL (DDG, bonus sources) carries no content and is fetched by this
+    machine. A DeepSeek result may carry the backend's page text: non-empty
+    `content` means the page is NOT fetched — the text is used as the record.
+    """
+    url: str
+    title: str = ""
+    content: str = ""
+    date: str = ""          # ISO day from the backend, "" when unknown
+    source: str = ""        # "deepseek-search" for supplied content
+    origin: str = ""        # "deepseek" for every DeepSeek search result
 
 
 @dataclass
@@ -684,6 +651,9 @@ class ResearchStats:
     content_chars: int = 0
     bonus_sources: dict = None  # {source_name: count}
     deepseek_urls: int = 0  # candidates contributed by the DeepSeek backend
+    deepseek_pages: int = 0  # report pages taken from the DeepSeek inventory
+    deepseek_content: int = 0  # pages whose body came from the search response
+    deepseek_local_fetches: int = 0  # DeepSeek results with no usable content
 
 
 def _quality_fields(results: Optional[List[FetchResult]]) -> dict:
@@ -1525,6 +1495,37 @@ def _create_fetch_result(
                 content = content[:max_length] + "\n\n[Truncated...]"
         return FetchResult(url=url, success=True, content=content, title=extract_title_from_content(content))
     return FetchResult(url=url, success=False, error="Too short")
+
+
+def _result_from_supplied(
+    job: PageJob,
+    min_length: int,
+    max_length: int,
+    query: str = "",
+) -> Optional[FetchResult]:
+    """Build a page record from search-backend-supplied text (no network).
+
+    DeepSeek's need_content response carries the page's extracted text; using it
+    as-is is the point of the flag — the page is never fetched here. Returns
+    None when the text cannot stand as a page (too short, or a blocked-page
+    marker): the caller then falls back to the ordinary fetch path, except for
+    PDFs, which search mode never downloads.
+    """
+    text = (job.content or "")[:MAX_CONTENT_BYTES]
+    if len(text) < min_length or is_blocked_content(text):
+        return None
+    result = _create_fetch_result(
+        job.url, text, min_length, max_length, query=query,
+    )
+    if not result.success:
+        return None
+    if job.title:
+        result.title = job.title
+    result.source = job.source or "deepseek-search"
+    day = _iso_day(job.date)
+    if day:
+        result.date, result.date_source = day, "deepseek"
+    return result
 
 
 def _extract_with_scrapling_fallback(page, min_length: int) -> str:
@@ -2512,60 +2513,22 @@ async def _maybe_escalate(
     render: str,
     escalation_budget: int,
     elapsed: float,
-    deepseek: bool = False,
 ) -> FetchResult:
     """Escalation ladder: retry a static failure once with the real browser.
 
-    Used by --url mode -- and by BOTH modes for the optional DeepSeek fetch
-    retry. In --url, retry-worthy failures (HTTP 403/429/5xx, CAPTCHA, Timeout
-    and Too short) get one browser retry, budget-capped; search mode passes
-    render="off", so only the DeepSeek branch runs there.
-    Non-retry-worthy failures (404, DNS, PDF...) return unchanged. The browser
-    tier is provisioned on first use by the --url preflight, which runs before the
-    wall-clock block — `_BROWSER_TIER_READY` False means that provisioning failed,
-    so there is nothing to retry with and the static result stands. The browser
-    tier is a subprocess that takes no progress argument and reports nothing to
-    this reporter — it reports through its own stderr; the static result is
-    reported here (once) when it wins. The budget check-then-increment is race-free: no
+    Used by --url mode; search mode passes render="off", so the ladder is inert
+    there. Retry-worthy failures (HTTP 403/429/5xx, CAPTCHA, Timeout and Too
+    short) get one browser retry, budget-capped. Non-retry-worthy failures
+    (404, DNS, PDF...) return unchanged. The browser tier is provisioned on
+    first use by the --url preflight, which runs before the wall-clock block —
+    `_BROWSER_TIER_READY` False means that provisioning failed, so there is
+    nothing to retry with and the static result stands. The browser tier is a
+    subprocess that takes no progress argument and reports nothing to this
+    reporter — it reports through its own stderr; the static result is reported
+    here (once) when it wins. The budget check-then-increment is race-free: no
     await between the check and the `+= 1` (single-threaded event loop; the
     await for the browser fetch happens after the increment).
-
-    With DeepSeek available (--url + WEB_RESEARCH_DEEPSEEK=1), failures in
-    DEEPSEEK_FETCH_ERRORS go to DeepSeek Fetch INSTEAD of the browser. When
-    that fetch also fails, the browser becomes the last step — but only for
-    walls a local browser can clear (BROWSER_AFTER_DEEPSEEK_ERRORS: 403/418/
-    429/5xx, CAPTCHA). DNS, connect, TLS and timeout failures behave the same
-    in a browser, so the static result stands for those.
     """
-    # Set when the DeepSeek retry also fails; the failure record then keeps BOTH reasons.
-    deepseek_failure = ""
-    if deepseek and not result.success and _deepseek_url_error(result.error or ""):
-        global _DEEPSEEK_FETCH_ATTEMPTS
-        _DEEPSEEK_FETCH_ATTEMPTS += 1
-        if progress:
-            progress.message(f"  [deepseek] static fetch failed ({result.error}) — trying DeepSeek Fetch")
-        ds_result = await _deepseek_fetch_paced(url, min_content_length)
-        if ds_result.success:
-            if progress:
-                progress.url_result(url, True, elapsed, "")
-            return ds_result
-        # DeepSeek failed too: the static error alone would hide why the retry did
-        # not rescue the page (HTTP 429, 404, no content, too short, API timeout).
-        deepseek_failure = (
-            f"{result.error or 'unknown error'} "
-            f"(DeepSeek: {ds_result.error or 'unknown error'})"
-        )
-        if progress:
-            progress.message(f"  [deepseek] fetch failed ({ds_result.error}) — not rescued")
-        # Chrome is the last step, but only where it can help.
-        if (result.error or "") not in BROWSER_AFTER_DEEPSEEK_ERRORS:
-            # The caller reports this object's error (report NOTES, --url stderr):
-            # without this the DeepSeek reason never leaves the progress record.
-            result.error = deepseek_failure
-            if progress:
-                progress.url_result(url, False, elapsed, deepseek_failure)
-            return result
-        # Fall through to the browser branch below for the clearable walls.
     if render == "auto" and _BROWSER_TIER_READY is not False:
         global _BROWSER_ESCALATIONS
         retry_worthy = (
@@ -2581,10 +2544,6 @@ async def _maybe_escalate(
                 if progress:
                     progress.url_result(url, True, elapsed, "")
                 return browser_result
-    if deepseek_failure:
-        # Both retries failed: keep the full reason in the failure record the
-        # caller reports, not just in the progress line.
-        result.error = deepseek_failure
     if progress:
         progress.url_result(url, result.success, elapsed, result.error or "")
     return result
@@ -2600,7 +2559,6 @@ async def fetch_single_async(
     escalation_budget: int = 3,
     render: str = "off",
     apply_filters: bool = True,
-    deepseek: bool = False,
     hard_cap: Optional[float] = None,
 ) -> FetchResult:
     """Fetch single URL using Scrapling's AsyncFetcher (TLS fingerprinting).
@@ -2758,7 +2716,7 @@ async def fetch_single_async(
                 url,
                 FetchResult(url=url, success=False, error=f"HTTP {page.status}"),
                 min_content_length,
-                progress, render, escalation_budget, elapsed, deepseek=deepseek,
+                progress, render, escalation_budget, elapsed,
             )
 
         try:
@@ -2832,7 +2790,7 @@ async def fetch_single_async(
                 url,
                 FetchResult(url=url, success=False, error="CAPTCHA/blocked"),
                 min_content_length,
-                progress, render, escalation_budget, elapsed, deepseek=deepseek,
+                progress, render, escalation_budget, elapsed,
             )
 
         # Extract text + JSON-LD in process pool (CPU-bound, don't block event loop)
@@ -2909,7 +2867,7 @@ async def fetch_single_async(
             url,
             result,
             min_content_length,
-            progress, render, escalation_budget, elapsed, deepseek=deepseek,
+            progress, render, escalation_budget, elapsed,
         )
 
     except asyncio.TimeoutError:
@@ -2918,7 +2876,7 @@ async def fetch_single_async(
             url,
             FetchResult(url=url, success=False, error="Timeout"),
             min_content_length,
-            progress, render, escalation_budget, elapsed, deepseek=deepseek,
+            progress, render, escalation_budget, elapsed,
         )
     except Exception as e:
         elapsed = time.monotonic() - t0
@@ -2928,7 +2886,7 @@ async def fetch_single_async(
             url,
             FetchResult(url=url, success=False, error=error_msg),
             min_content_length,
-            progress, render, escalation_budget, elapsed, deepseek=deepseek,
+            progress, render, escalation_budget, elapsed,
         )
 
 
@@ -3077,18 +3035,21 @@ class MultiSearch:
 # DEEPSEEK SEARCH (optional — WEB_RESEARCH_DEEPSEEK=1)
 # =============================================================================
 
-# One request per query. Billing is per successful request, not per result, so
-# the whole fallback inventory is free: ask for the largest count the run can
-# ever use, then enqueue only what the current mode warrants.
-DEEPSEEK_REQUEST_COUNT = 40   # API maximum is 50; 40 = the run's full page budget
+# One request per query. Billing is per successful request, not per result or
+# per content page, so the whole inventory is free: ask for the largest count
+# the API accepts (50) and enqueue only what the current mode warrants — the
+# surplus is insurance against blocked URLs, PDFs, duplicates and missing
+# content, not extra report pages.
+DEEPSEEK_REQUEST_COUNT = 50   # API maximum; the request price is the same
 DEEPSEEK_HEALTHY_LIMIT = 20   # pages added while DuckDuckGo is delivering
-DEEPSEEK_FALLBACK_LIMIT = 40  # pages used when DuckDuckGo returns nothing
-# The search request needs headroom (its result list is the run's whole page
-# supply). A page fetch does not: observed DeepSeek fetches answer in 1-3s and
-# half of the fallback attempts used to run to the old 10s cap, so the fetch
-# tier is bounded tightly while the search call keeps the larger window.
-DEEPSEEK_SEARCH_TIMEOUT = 10.0
-DEEPSEEK_FETCH_TIMEOUT = 5.0
+DEEPSEEK_FALLBACK_LIMIT = 50  # pages used when DuckDuckGo returns nothing
+# need_content makes the API extract every result's page before answering, so
+# the search call needs real headroom: the old content-less call answered in
+# 1-3s, and 10s is too tight once text is generated for up to 50 pages.
+DEEPSEEK_SEARCH_TIMEOUT = 25.0
+# One response body carries up to 50 page texts; bound the read so an
+# unterminated stream can never balloon memory.
+DEEPSEEK_RESPONSE_MAX_BYTES = 64 * 1024 * 1024
 
 
 def deepseek_enabled() -> bool:
@@ -3149,12 +3110,25 @@ def _deepseek_url(url: str) -> str:
     return urllib.parse.urlunsplit((parts.scheme, parts.netloc, parts.path, parts.query, ""))
 
 
+@dataclass
+class DeepSeekHit:
+    """One search result, with its page text when the API returned any."""
+    url: str
+    title: str = ""
+    snippet: str = ""
+    summary: str = ""
+    content: str = ""
+    date: str = ""
+
+
 class DeepSeekSearch:
     """DeepSeek in-house search backend (POST /v1/tools/search).
 
-    Yields (url, title, snippet) tuples in the API's rerank order. Every
-    failure is raised to the caller, which absorbs it: a missing key, an HTTP
-    error, or an empty result list leaves the DuckDuckGo path untouched.
+    Returns DeepSeekHit objects in the API's rerank order. Every request asks
+    for page content (`need_content`, always on): a hit that carries content is
+    used as the page and is never fetched by this machine. Every failure is
+    raised to the caller, which absorbs it: a missing key, an HTTP error, or an
+    empty result list leaves the DuckDuckGo path untouched.
     """
 
     ENDPOINT = "https://api.deepseek.com/v1/tools/search"
@@ -3164,7 +3138,7 @@ class DeepSeekSearch:
         query: str,
         count: int = DEEPSEEK_REQUEST_COUNT,
         since: str = "",
-    ) -> List[Tuple[str, str, str]]:
+    ) -> List[DeepSeekHit]:
         """One search request. `since` (d/w/m/y) maps to the API's after: operator."""
         key = resolve_deepseek_key()
         if not key:
@@ -3184,7 +3158,13 @@ class DeepSeekSearch:
         if len(q) > limit:
             q = q[:limit].rsplit(" ", 1)[0] or q[:limit]
         q += suffix
-        payload = json.dumps({"query": q, "count": max(1, min(50, count))}).encode()
+        payload = json.dumps({
+            "query": q,
+            "count": max(1, min(50, count)),
+            # Always on: the returned page text replaces a local fetch for that
+            # result. Costs nothing extra — billing is per request.
+            "need_content": True,
+        }).encode()
         req = urllib.request.Request(
             self.ENDPOINT,
             data=payload,
@@ -3194,137 +3174,22 @@ class DeepSeekSearch:
             },
         )
         with urllib.request.urlopen(req, timeout=DEEPSEEK_SEARCH_TIMEOUT) as resp:
-            data = json.loads(resp.read().decode("utf-8", errors="replace"))
-        results: List[Tuple[str, str, str]] = []
+            raw = resp.read(DEEPSEEK_RESPONSE_MAX_BYTES)
+        data = json.loads(raw.decode("utf-8", errors="replace"))
+        results: List[DeepSeekHit] = []
         for item in data.get("results") or []:
             url = _deepseek_url(item.get("url", ""))
             if not url or is_blocked_url(url):
                 continue
-            results.append((
-                url,
-                item.get("title") or "",
-                item.get("snippet") or item.get("summary") or "",
+            results.append(DeepSeekHit(
+                url=url,
+                title=item.get("title") or "",
+                snippet=item.get("snippet") or item.get("summary") or "",
+                summary=item.get("summary") or "",
+                content=item.get("content") or "",
+                date=item.get("date") or "",
             ))
         return results
-
-
-class DeepSeekFetch:
-    """DeepSeek page fetch (POST /v1/tools/fetch) — returns extracted Markdown.
-
-    --url tier of last resort for pages this machine cannot reach (DNS,
-    connect, timeout, TLS) or that answer with a server-side access wall. The
-    API refuses non-public addresses and binary content types, so a PDF or an
-    intranet URL simply comes back as a failure.
-    """
-
-    ENDPOINT = "https://api.deepseek.com/v1/tools/fetch"
-
-    def fetch(self, url: str) -> FetchResult:
-        key = resolve_deepseek_key()
-        if not key:
-            return FetchResult(url=url, success=False, source="deepseek",
-                               error="DeepSeek fetch: no API key")
-        payload = json.dumps({"url": url}).encode()
-        req = urllib.request.Request(
-            self.ENDPOINT,
-            data=payload,
-            headers={
-                "Authorization": f"Bearer {key}",
-                "Content-Type": "application/json",
-            },
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=DEEPSEEK_FETCH_TIMEOUT) as resp:
-                data = json.loads(resp.read().decode("utf-8", errors="replace"))
-        except Exception as e:
-            code = getattr(e, "code", None)
-            return FetchResult(
-                url=url, success=False, source="deepseek",
-                error=f"HTTP {code}" if code else type(e).__name__,
-            )
-        content = (data.get("content") or "").strip()
-        if not content:
-            return FetchResult(url=url, success=False, source="deepseek",
-                               error="DeepSeek fetch: no content")
-        return FetchResult(
-            url=url, success=True, source="deepseek",
-            content=content, title=(data.get("title") or "").strip(),
-        )
-
-
-def _fetch_with_deepseek(url: str, min_length: int) -> FetchResult:
-    """DeepSeek fetch with the same minimum-length gate the browser tier uses."""
-    result = DeepSeekFetch().fetch(url)
-    if result.success and len(result.content) < min_length:
-        return FetchResult(url=url, success=False, source="deepseek",
-                           error="DeepSeek fetch: too short")
-    return result
-
-
-# Dedicated pool for the fallback fetches. The API limits request *starts*
-# (5/s per account, Search and Fetch share it), not concurrency — the pacing
-# below enforces that separately. The default asyncio executor is sized at
-# cpu+4 (8 on a 4-CPU box), so a 30-page fallback queued in waves and every
-# wave paid the full timeout. Worst-case in flight = QPS x fetch timeout
-# (4 x 5s = 20); 24 workers leave headroom without unbounded threads.
-DEEPSEEK_FETCH_WORKERS = 24
-_deepseek_fetch_pool: Optional[ThreadPoolExecutor] = None
-
-
-def _get_deepseek_fetch_pool() -> ThreadPoolExecutor:
-    global _deepseek_fetch_pool
-    if _deepseek_fetch_pool is None:
-        _deepseek_fetch_pool = ThreadPoolExecutor(
-            max_workers=DEEPSEEK_FETCH_WORKERS,
-            thread_name_prefix="deepseek-fetch",
-        )
-    return _deepseek_fetch_pool
-
-
-def _shutdown_deepseek_fetch_pool() -> None:
-    global _deepseek_fetch_pool
-    if _deepseek_fetch_pool is not None:
-        _deepseek_fetch_pool.shutdown(wait=False, cancel_futures=True)
-        _deepseek_fetch_pool = None
-
-
-atexit.register(_shutdown_deepseek_fetch_pool)
-
-
-# Search mode retries every failed page in parallel, while the API allows 5
-# requests/second per account (Search and Fetch share it). Starts are paced,
-# not serialised: a response takes seconds, so pacing starts keeps the API
-# inside its limit without collapsing the run into one fetch at a time. The
-# calls themselves run on the dedicated pool above, not the default executor.
-DEEPSEEK_FETCH_QPS = 4
-_DEEPSEEK_CALL_TIMES: List[float] = []
-
-
-async def _deepseek_start_slot() -> None:
-    """Wait until one more DeepSeek request may start."""
-    while True:
-        now = time.monotonic()
-        _DEEPSEEK_CALL_TIMES[:] = [t for t in _DEEPSEEK_CALL_TIMES if now - t < 1.0]
-        if len(_DEEPSEEK_CALL_TIMES) < DEEPSEEK_FETCH_QPS:
-            _DEEPSEEK_CALL_TIMES.append(now)
-            return
-        await asyncio.sleep(0.05)
-
-
-async def _deepseek_fetch_paced(url: str, min_length: int) -> FetchResult:
-    """Paced DeepSeek fetch, with one retry when the API answers 429."""
-    loop = asyncio.get_running_loop()
-    await _deepseek_start_slot()
-    result = await loop.run_in_executor(
-        _get_deepseek_fetch_pool(), _fetch_with_deepseek, url, min_length,
-    )
-    if not result.success and result.error == "HTTP 429":
-        await asyncio.sleep(1.0)
-        await _deepseek_start_slot()
-        result = await loop.run_in_executor(
-            _get_deepseek_fetch_pool(), _fetch_with_deepseek, url, min_length,
-        )
-    return result
 
 
 # =============================================================================
@@ -3349,7 +3214,7 @@ async def run_research_async(
 
     urls: List[str] = []
     pdf_links: List[Tuple[str, str]] = []
-    fetch_queue: asyncio.Queue[Optional[str]] = asyncio.Queue()
+    fetch_queue: asyncio.Queue[Optional[PageJob]] = asyncio.Queue()
     result_queue: asyncio.Queue[Optional[FetchResult]] = asyncio.Queue()
     stats = ResearchStats(query=config.query)
 
@@ -3371,11 +3236,11 @@ async def run_research_async(
             # failures are absorbed here: the run continues on DDG unchanged.
             ds_pool = ThreadPoolExecutor(max_workers=1) if config.deepseek else None
             ds_future = None
-            ds_items: List[Tuple[str, str, str]] = []
+            ds_items: List[DeepSeekHit] = []
             ds_loaded = False
             ds_consumed = 0
             if ds_pool is not None:
-                def _run_deepseek() -> List[Tuple[str, str, str]]:
+                def _run_deepseek() -> List[DeepSeekHit]:
                     try:
                         return DeepSeekSearch().search(
                             config.query, DEEPSEEK_REQUEST_COUNT,
@@ -3409,14 +3274,20 @@ async def run_research_async(
                 return max(0, len(ds_items) - ds_consumed)
 
             def _enqueue_ds(limit: int) -> bool:
-                """Enqueue one DeepSeek result; False when none is eligible."""
+                """Enqueue one DeepSeek result; False when none is eligible.
+
+                A hit with content becomes a PageJob whose body is used as-is —
+                the page is NOT fetched. A hit without content (or a PDF, which
+                search mode never downloads) follows the ordinary path.
+                """
                 nonlocal enqueued, ds_consumed
-                if ds_future is None or stats.deepseek_urls >= limit:
+                if ds_future is None or stats.deepseek_pages >= limit:
                     return False
                 _ds_ensure()
                 while ds_consumed < len(ds_items):
-                    url, title, snippet = ds_items[ds_consumed]
+                    hit = ds_items[ds_consumed]
                     ds_consumed += 1
+                    url = hit.url
                     if url in seen_in_search:
                         continue
                     if global_seen_urls is not None:
@@ -3427,10 +3298,29 @@ async def run_research_async(
                     urls.append(url)
                     stats.urls_searched = len(urls)
                     if _is_pdf_url(url):
-                        pdf_links.append((url, title))
+                        # The direct link is always listed; with content the PDF
+                        # is ALSO a report page. Never downloaded either way.
+                        pdf_links.append((url, hit.title))
+                        if hit.content:
+                            loop.call_soon_threadsafe(
+                                fetch_queue.put_nowait,
+                                PageJob(url=url, title=hit.title,
+                                        content=hit.content, date=hit.date,
+                                        source="deepseek-search", origin="deepseek"),
+                            )
+                            stats.deepseek_pages += 1
+                            enqueued += 1
+                            return True
                         continue
                     stats.deepseek_urls += 1
-                    loop.call_soon_threadsafe(fetch_queue.put_nowait, url)
+                    loop.call_soon_threadsafe(
+                        fetch_queue.put_nowait,
+                        PageJob(url=url, title=hit.title,
+                                content=hit.content, date=hit.date,
+                                source="deepseek-search" if hit.content else "",
+                                origin="deepseek"),
+                    )
+                    stats.deepseek_pages += 1
                     enqueued += 1
                     return True
                 return False
@@ -3442,6 +3332,11 @@ async def run_research_async(
                 for url, title, snippet in searcher.search(
                     config.query, config.search_results, timelimit=timelimit
                 ):
+                    if url in seen_in_search:
+                        # DeepSeek may already have contributed this URL; the
+                        # shared set is the run-wide intake guard for every
+                        # source, not just for the DeepSeek enqueue.
+                        continue
                     if global_seen_urls is not None:
                         if url in global_seen_urls:
                             continue
@@ -3468,7 +3363,7 @@ async def run_research_async(
                         # transfer + extraction is the run's worst tail.
                         pdf_links.append((url, title))
                         continue
-                    loop.call_soon_threadsafe(fetch_queue.put_nowait, url)
+                    loop.call_soon_threadsafe(fetch_queue.put_nowait, PageJob(url=url))
                     enqueued += 1
                     ddg_enqueued += 1
                     # 1:1 interleave: one DeepSeek page per DDG page keeps the
@@ -3545,7 +3440,7 @@ async def run_research_async(
                     return
                 if source:
                     stats.bonus_sources[source] = stats.bonus_sources.get(source, 0) + 1
-                loop.call_soon_threadsafe(fetch_queue.put_nowait, url)
+                loop.call_soon_threadsafe(fetch_queue.put_nowait, PageJob(url=url))
                 enqueued += 1
 
             # Run bonus searches in parallel (topic-specific sources).
@@ -3832,28 +3727,57 @@ async def run_research_async(
             await fetch_queue.put(None)
 
     async def fetch_consumer() -> None:
+        loop = asyncio.get_running_loop()
         semaphore = asyncio.Semaphore(config.max_concurrent)
         pending: List[asyncio.Task] = []
-        fetch_limit = config.fetch_count + (
-            DEEPSEEK_HEALTHY_LIMIT if config.deepseek else 0
-        )
+        # Separate admission budgets by cost. A supplied-content page costs no
+        # request and is always admitted; DDG/bonus pages share the fetch_count
+        # budget, and DeepSeek pages that still need a fetch get their own
+        # share so a 50-result DDG list cannot crowd them out.
+        ddg_started = 0
+        ds_started = 0
 
-        async def fetch_one(url: str) -> None:
+        async def fetch_one(job: PageJob) -> None:
             async with semaphore:
+                if job.content:
+                    result = await loop.run_in_executor(
+                        None, _result_from_supplied, job,
+                        config.min_content_length, config.max_content_length,
+                        config.query,
+                    )
+                    if result is not None:
+                        stats.deepseek_content += 1
+                        await result_queue.put(result)
+                        return
+                    if _is_pdf_url(job.url):
+                        # PDFs are never downloaded in search mode; the direct
+                        # link is already listed in the PDF LINKS block.
+                        return
+                if job.origin == "deepseek":
+                    stats.deepseek_local_fetches += 1
                 result = await fetch_single_async(
-                    url, config.timeout,
+                    job.url, config.timeout,
                     config.min_content_length, config.max_content_length,
                     progress=progress, query=config.query,
-                    deepseek=config.deepseek,
                 )
                 await result_queue.put(result)
 
         while True:
-            url = await fetch_queue.get()
-            if url is None:
+            job = await fetch_queue.get()
+            if job is None:
                 break
-            if fetch_limit == 0 or len(pending) < fetch_limit:
-                pending.append(asyncio.create_task(fetch_one(url)))
+            admitted = False
+            if job.content:
+                admitted = True
+            elif job.origin == "deepseek":
+                if ds_started < DEEPSEEK_FALLBACK_LIMIT:
+                    ds_started += 1
+                    admitted = True
+            elif config.fetch_count <= 0 or ddg_started < config.fetch_count:
+                ddg_started += 1
+                admitted = True
+            if admitted:
+                pending.append(asyncio.create_task(fetch_one(job)))
 
         if pending:
             await asyncio.gather(*pending, return_exceptions=True)
@@ -3861,9 +3785,8 @@ async def run_research_async(
 
     progress.phase_start("fetch")
     # Fresh per-run escalation budget (module counter shared across fetch tasks)
-    global _BROWSER_ESCALATIONS, _DEEPSEEK_FETCH_ATTEMPTS
+    global _BROWSER_ESCALATIONS
     _BROWSER_ESCALATIONS = 0
-    _DEEPSEEK_FETCH_ATTEMPTS = 0
     asyncio.create_task(search_producer())
     asyncio.create_task(fetch_consumer())
 
@@ -3879,6 +3802,13 @@ async def run_research_async(
         progress.update("fetch", fetched, stats.urls_searched or fetched)
         yield result
 
+    if stats.deepseek_content or stats.deepseek_local_fetches:
+        progress.message(
+            f"  [deepseek] {stats.deepseek_content} page(s) with content "
+            f"(not fetched), {stats.deepseek_local_fetches} fetched locally"
+        )
+    status["deepseek_content_pages"] = stats.deepseek_content
+    status["deepseek_local_fetches"] = stats.deepseek_local_fetches
     progress.newline()
     progress.summary(stats.urls_fetched, stats.urls_searched, stats.content_chars)
 
@@ -4820,6 +4750,16 @@ def _notes_lines(
     if status.get("search_error"):
         search_bits.append(f"error: {status['search_error']}")
     lines.append(", ".join(search_bits))
+    if status.get("deepseek_content_pages"):
+        lines.append(
+            f"- content: {status['deepseek_content_pages']} page(s) from DeepSeek "
+            "search (not fetched locally)"
+        )
+    if status.get("deepseek_local_fetches"):
+        lines.append(
+            f"- deepseek: {status['deepseek_local_fetches']} result(s) had no usable "
+            "content — fetched locally"
+        )
     if truncated_pages:
         lines.append(f"- truncated: {truncated_pages} page(s) at 200k chars")
     for warning in (warnings or []):
@@ -5455,7 +5395,6 @@ def run_research(config: ResearchConfig, status: Optional[dict] = None) -> Optio
                 results.append(result)
         finally:
             _shutdown_extract_pool()
-            _shutdown_deepseek_fetch_pool()
 
     # Whole-run bound for the async core on ALL platforms (Windows has no
     # SIGALRM, so the Unix watchdog in main() does not apply there). This
@@ -5513,8 +5452,6 @@ Structured sources: RSS/Atom feeds, Hacker News threads, arXiv full text, PDFs (
                         help="Fetch one URL directly: raw page text saved to a report file (skip search, no quality filters)")
     parser.add_argument("--no-render", action="store_true",
                         help="Disable browser rendering entirely (pure static path)")
-    parser.add_argument("--url-deepseek", metavar="URL",
-                        help=argparse.SUPPRESS)  # hidden: explicit DeepSeek fetch tier
     parser.add_argument("--usage", action="store_true",
                         help="Show usage statistics (last 30 days)")
     parser.add_argument("--sci", action="store_true",
@@ -5569,43 +5506,20 @@ Structured sources: RSS/Atom feeds, Hacker News threads, arXiv full text, PDFs (
     # cap), save it RAW (quality filters OFF, full-document DOM text — every
     # visible text node, nav/boilerplate included), write to its own report
     # file, print ONLY the absolute path to stdout.
-    if args.url or args.url_deepseek:
-        # --url-deepseek (hidden): the same --url output path, but the page is
-        # fetched by DeepSeek from its own egress — no local fetch, no browser.
-        deepseek_only = bool(args.url_deepseek)
-        if deepseek_only:
-            url = str(args.url_deepseek).strip()
-            if not re.match(r"(?i)^https?://", url):
-                parser.error("--url-deepseek takes one http(s) URL")
-            if not resolve_deepseek_key():
-                print(
-                    "--url-deepseek: no DeepSeek API key found (set DEEPSEEK_API_KEY "
-                    "or provider.deepseek.options.apiKey in "
-                    "~/.config/opencode/opencode.json)",
-                    file=sys.stderr,
-                )
-                sys.exit(1)
-        else:
-            if len(args.url) > 1:
-                parser.error("only one URL per invocation")
-            url = args.url[0]
+    if args.url:
+        if len(args.url) > 1:
+            parser.error("only one URL per invocation")
+        url = args.url[0]
 
         # Render mode: default auto (browser only when static fetch fails);
         # --no-render disables it entirely. WEB_RESEARCH_NO_BROWSER=1 overrides
-        # everything (pure static path). The explicit DeepSeek tier uses neither.
-        if deepseek_only:
-            render_mode = "off"
-        elif os.environ.get("WEB_RESEARCH_NO_BROWSER") == "1":
+        # everything (pure static path).
+        if os.environ.get("WEB_RESEARCH_NO_BROWSER") == "1":
             render_mode = "off"
         elif args.no_render:
             render_mode = "off"
         else:
             render_mode = "auto"
-
-        # Automatic DeepSeek fallback: only while the backend is enabled and a
-        # key is available. It replaces the browser stage for unreachable or
-        # blocked pages (see DEEPSEEK_FETCH_ERRORS).
-        ds_ready = deepseek_enabled() and bool(resolve_deepseek_key())
 
         _ensure_report_dir()
 
@@ -5616,20 +5530,15 @@ Structured sources: RSS/Atom feeds, Hacker News threads, arXiv full text, PDFs (
         if render_mode != "off":
             _ensure_browser_tier()
 
-        global _BROWSER_ESCALATIONS, _DEEPSEEK_FETCH_ATTEMPTS
+        global _BROWSER_ESCALATIONS
         _BROWSER_ESCALATIONS = 0
-        _DEEPSEEK_FETCH_ATTEMPTS = 0
         _reset_scholarly_budget()
         progress = ProgressReporter()
 
         async def _fetch_url_single(u: str) -> FetchResult:
-            if deepseek_only:
-                return await asyncio.get_running_loop().run_in_executor(
-                    None, _fetch_with_deepseek, u, 100,
-                )
             return await fetch_single_async(
                 u, URL_FETCH_TIMEOUT, 100, None, progress=progress, render=render_mode,
-                deepseek=ds_ready, hard_cap=URL_FETCH_TIMEOUT,
+                hard_cap=URL_FETCH_TIMEOUT,
                 apply_filters=False,  # --url raw mode: page text as extracted, no F4/F1 cleanup
             )
 
@@ -5823,8 +5732,8 @@ Structured sources: RSS/Atom feeds, Hacker News threads, arXiv full text, PDFs (
             "ms": int((time.monotonic() - t0) * 1000), "timeout": False,
             "deepseek_urls": search_status.get("deepseek_urls", 0),
             "deepseek_fallback": bool(search_status.get("deepseek_fallback")),
-            "deepseek_fetches": sum(1 for r in (results or []) if r.source == "deepseek"),
-            "deepseek_fetch_attempts": _DEEPSEEK_FETCH_ATTEMPTS,
+            "deepseek_content_pages": search_status.get("deepseek_content_pages", 0),
+            "deepseek_local_fetches": search_status.get("deepseek_local_fetches", 0),
             "pdf_links": len(pdf_links),
             **quality_fields,
         })
