@@ -30,7 +30,7 @@ The shipped `opencode.json` allows all operations by default. Delete or tweak it
 
 ### Optional: DeepSeek search
 
-`web_search.sh` can also query DeepSeek's in-house search index alongside DuckDuckGo — 20 extra pages per query, or 50 when DuckDuckGo is unavailable. DeepSeek returns each page's content with the search response, so those pages are written to the report without a local fetch. Off by default; enable it in your shell:
+`web_search.sh` can also query DeepSeek's in-house search index alongside DuckDuckGo — 20 extra pages per query, or 50 when DuckDuckGo is unavailable. DeepSeek returns each page's content with the search response, so those pages are written to the report without a local fetch; a result without usable content falls back to the local fetcher. Off by default; enable it in your shell:
 
 ```bash
 export WEB_RESEARCH_DEEPSEEK=1
