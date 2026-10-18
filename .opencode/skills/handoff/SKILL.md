@@ -19,26 +19,31 @@ This skill is the single home for handoff mechanics — the workflow's continuat
 ## Template (fixed structure — adapt content, never structure)
 
 ````markdown
-HANDOFF — <task/session name>   (written before replacement)
+HANDOFF — <task/session name>   (as of <date> <time>, written before replacement)
 
 These notes are the established background from the previous run. Treat them as a
 bounded handoff: build on them, confirm their claims against the workspace before
 acting, and do not restate or re-derive them.
 
 ## Objective and Intent
-- <original and evolving goals; quote exact wording when it matters>
+- Original request: <verbatim> — source: <task file | user message | report path>
+- <how the goal evolved, and why each pivot happened>
 
 ## Key Technical Concepts
 - <technologies, patterns, conventions in play>
 
 ## Files and Artifacts
-- <path>: <why it matters / what changed>
+- <path>[:<line>]: <why it matters / what changed>
 
 ## Errors and Fixes
 - <error>: <resolution; reviewer/user feedback included>
+- Cleared: <what was checked> → <conclusion, including "nothing found">
+- Abandoned: <approach> — <why>
 
 ## Pending Work
-- <explicitly requested work not yet completed>
+- Open objectives: <objective> — source: <report path + section | plan AC-n | task file | user message>
+- <explicitly requested work not yet completed that is not a tracked objective>
+- Closed: <objective> — completed at <where> | superseded by <what>
 
 ## Current Work
 - <precisely what was in progress at this point>
@@ -49,9 +54,15 @@ acting, and do not restate or re-derive them.
 ## Critical Context
 - <decisions and rationale, constraints, open questions>
 
-Rules: terse bullets; exact paths, commands, identifiers, and numbers preserved;
-"(none)" for empty sections — never drop a section; completeness over brevity
-(no size cap); no meta commentary.
+Rules: terse bullets; exact file paths and line numbers, exact error text, exact
+versions and thresholds preserved; decisions written "chose X over Y because Z"; a
+verbatim quote must be read from a source present at write time — the live
+conversation, a task file, a report — never reconstructed from memory; when the
+wording is not available, mark it "(paraphrased)"; every still-open objective carries
+its source and none is dropped while open; work that produced nothing (searches,
+rejected hypotheses, abandoned approaches) is recorded only where a successor could
+otherwise repeat it, one line each; "(none)" for empty sections — never add or drop
+a section; completeness over brevity (no size cap); no meta commentary.
 ````
 
 ## Mode A — Retire a run
@@ -61,7 +72,7 @@ Rules: terse bullets; exact paths, commands, identifiers, and numbers preserved;
 1. Decide retirement (the reuse threshold or an earlier lead call).
 2. Resume the retiring run once with a self-contained instruction: "Write your handoff to `tmp/<retiring-name>-handoff.md` using exactly the template below [template included in the instruction], then stop — do not do further work. The handoff file is the deliverable for this final step; it is authorized here and overrides the original WRITABLE FILES directive — leave the report as-is." This final resume is the retirement step itself; the retired run's reuse budget ends with it. If the `task_id` is expired or the run cannot write it, the lead writes the handoff from the report.
 3. Completeness check: verify all 8 section headings exist (`grep -c '^## ' tmp/<retiring-name>-handoff.md` — expect 8). "(none)" is acceptable; a missing section is not — resume the retiring run once more to fix it.
-4. Do not spawn the successor until the handoff passes the check — no downstream read before the artifact is complete. The successor is a new name, a new run; its task file carries the same task, with the handoff first in PRIOR CONTEXT — written with the retiring run's literal name, `tmp/<retiring-name>-handoff.md` — and the full report as backup. Add the consumption line: "Read the handoff first and treat it as bounded — build on it, confirm its claims against the workspace before acting, and do not restate it; once fully restored, delete `tmp/<retiring-name>-handoff.md` — it is consumed state."
+4. Do not spawn the successor until the handoff passes the check — no downstream read before the artifact is complete. The successor is a new name, a new run; its task file carries the same task, with the handoff first in PRIOR CONTEXT — written with the retiring run's literal name, `tmp/<retiring-name>-handoff.md` — and the full report as backup. Add the consumption line: "Read the handoff first and treat it as bounded — build on it, confirm its claims against the workspace before acting, and do not restate it. Before acting on any claim your next step depends on, read the report section it cites, if any. If the handoff was missing something you had to re-derive, say so in your report. Once fully restored, delete `tmp/<retiring-name>-handoff.md` — it is consumed state."
 5. Record the successor's `task_id` (`tmp/<successor-name>-task-id.txt`, the workflow's task-id convention); annotate the retired run's `tmp/<retiring-name>-task-id.txt` with `retired -> <successor-name>`.
 
 ## Mode B — Checkpoint the session
@@ -75,8 +86,11 @@ Rules: terse bullets; exact paths, commands, identifiers, and numbers preserved;
 ## Consuming a handoff
 
 - Read the handoff first; treat it as bounded — build on it, confirm its claims against the workspace before acting, do not restate it.
+- Restore deliberately: before acting on a handoff claim that the Next Step depends on, read the section it cites, if any — Mode A: the report (a subagent does not open `tmp/glm-plan.md` unless its task file directs it); Mode B: the report or the plan. Restoration never happens on its own.
+- Follow or record every reference you will need **before** deleting the handoff — Mode A: the report path in the successor's task file; Mode B: a session note or the live plan.
 - The full report and artifacts remain the depth source; the handoff is the map to them.
 - When a handoff claim contradicts the workspace, the workspace wins — update the handoff rather than following a stale claim.
+- If the handoff was missing something you had to re-derive, record it — `### Not Covered` in an agent report, a session note for the lead.
 - **Delete after full restore (MANDATORY):** once the handoff is fully restored — read, and its claims confirmed against the workspace — delete the saved handoff state; the restorer holds the live state now, and a consumed handoff must never linger as a stale resume trigger. Mode A: the successor deletes `tmp/<retiring-name>-handoff.md` per the consumption line — or the lead deletes it if the successor cannot write. Mode B: the restorer deletes the handoff file and its `handoff:` session note (`memory.sh session show` → `session delete <id>`) where one exists. If the session pauses again later, write a fresh handoff (Mode B).
 
 ## Rules
@@ -84,7 +98,7 @@ Rules: terse bullets; exact paths, commands, identifiers, and numbers preserved;
 - One handoff per replacement (Mode A) or per task (Mode B), written by the party with live context (retiring run in Mode A, main model in Mode B).
 - Delete the saved handoff state once restoration is complete — the restored live state supersedes the handoff; a leftover handoff risks a false resume (see Consuming a handoff).
 - When the workflow tracks agent `task_id`s, list completed and in-flight ids in `## Critical Context` — a replacement lead resumes incomplete runs instead of redoing them.
-- Mode B handoffs carry the run's Change Spec verbatim (`tmp/glm-plan.md` Change Spec section: Intent, Non-Goals, `AC-n` criteria, Definition of Done) whenever a plan exists — the plan file is tmp and may not survive the session.
+- Mode B handoffs carry the workflow's Change Spec verbatim whenever the workflow keeps one (orchestrator: the `tmp/glm-plan.md` Change Spec — Intent, Non-Goals, `AC-n` criteria, Definition of Done) — the plan file is tmp and may not survive the session.
 - Paths are literal: Mode A `tmp/<retiring-name>-handoff.md`, Mode B `tmp/handoff-<slug>.md` — never `{NAME}` in a successor's task file (see the Mode A path rule).
 - "Handoff" is the term everywhere — no "continuation summary" / "handoff summary" variants.
 - Handoff files are never matched by the tmp cleanup globs — they survive the routine sweep and are removed only deliberately: on full restore (both modes), or on task completion when no restoration happened (see Consuming a handoff).
