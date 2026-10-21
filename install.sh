@@ -142,6 +142,20 @@ main() {
   # Ensure all .sh scripts are executable (fixes macOS clone without +x)
   find "$target/.opencode" -name '*.sh' -exec chmod +x {} + 2>/dev/null || true
 
+  # .opencode/agents/ is suite-owned: remove agent definitions the suite no
+  # longer ships, so a stale agent cannot conflict with the current set.
+  stale_agents=0
+  while IFS= read -r agent_file; do
+    agent_base="$(basename "$agent_file")"
+    if [[ ! -f "$SCRIPT_DIR/.opencode/agents/$agent_base" ]]; then
+      rm -f "$agent_file"
+      stale_agents=$((stale_agents + 1))
+    fi
+  done < <(find "$target/.opencode/agents" -maxdepth 1 -type f -name '*.md')
+  if (( stale_agents > 0 )); then
+    info "Removed $stale_agents stale agent definition(s) not shipped by this suite"
+  fi
+
   # ── Step 3: AGENTS.md ──
   step "Setting up AGENTS.md"
 

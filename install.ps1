@@ -163,6 +163,23 @@ function Main {
         Write-Info "Removed legacy plugin copy at .opencode\plugins\fix-prompt.js"
     }
 
+    # .opencode\agents\ is suite-owned: remove agent definitions the suite no
+    # longer ships, so a stale agent cannot conflict with the current set.
+    $agentsDir = Join-Path $opencodeDir "agents"
+    $srcAgentsDir = Join-Path $srcOpencode "agents"
+    if (Test-Path $agentsDir) {
+        $staleAgents = 0
+        Get-ChildItem -Path $agentsDir -Filter *.md -File | ForEach-Object {
+            if (-not (Test-Path (Join-Path $srcAgentsDir $_.Name))) {
+                Remove-Item $_.FullName -Force
+                $staleAgents++
+            }
+        }
+        if ($staleAgents -gt 0) {
+            Write-Info "Removed $staleAgents stale agent definition(s) not shipped by this suite"
+        }
+    }
+
     # -- Step 3: AGENTS.md --
     Write-Step "Setting up AGENTS.md"
 

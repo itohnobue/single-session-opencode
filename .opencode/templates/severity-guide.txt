@@ -1,22 +1,25 @@
 SEVERITY GUIDE:
 Severity definitions:
-- CRITICAL: Proven data loss/breach/crash in PRODUCTION normal flow, no guards preventing it
-- HIGH: Proven bug in core functionality, realistic trigger
-- MEDIUM: Non-core path, unusual but possible conditions
-- LOW: Style, defense-in-depth, dev-only, hypothetical
+- CRITICAL: Proven, irreversible harm — destroyed data, exposed secrets, auth bypass, or loss/crash in normal use with no guard preventing it
+- HIGH: Release-blocking — the deliverable would not go to its intended users as it stands: a brief or acceptance-criteria requirement unmet, or normal use producing a failure that matters (wrong or lost data, exposed secrets, a core function that does not work). Judge against the brief as written and the intended use, not an unstated ideal
+- MEDIUM: User-visible but contained, or recoverable in one step; not release-blocking
+- LOW: Code style, internal tooling, defence-in-depth, hypothetical, or an unprovable trigger; immediately reversible
 
 Auto-cap rules (MANDATORY — violations = invalid finding):
 - Can't prove realistic trigger → cap at LOW
-- Code quality / style issues → cap at LOW
-- Libraries/SDKs: input validation is caller's responsibility → cap at LOW
+- Code-quality and code-style issues → cap at LOW (presentation defects follow the presentation rule below)
+- Libraries/SDKs: input validation is caller's responsibility → cap at LOW, unless the brief or the library's own contract requires it
 - Tests document the behavior → cap at MEDIUM
-- Private repo + hardcoded credentials → cap at LOW
+- Hardcoded credentials that are a deliberate, documented project decision (a local dev or test fixture, or a choice recorded in the repo's docs) → cap at LOW. Otherwise: private repo → cap at MEDIUM; a credential that grants access outside the repo, a repo shared with anyone else, or any production secret → release-blocking (HIGH)
 - "Possible" / "could" / "may" in your description → cap at MEDIUM
 - Security finding without proven exploit path → cap at LOW
 - Timing attacks over network → cap at LOW
 - Missing rate limiting → cap at LOW (infrastructure concern)
 - No try/catch around X → check if X actually throws in production before escalating severity
 - Pattern recognized ≠ issue confirmed. Prove the issue actually manifests, not just that the pattern is present
+- Cosmetic presentation divergence (spacing, colour, non-functional styling) → cap at MEDIUM. A presentation defect a user would read as the deliverable being broken — missing or collapsed layout, overlapping or unreadable text, misplaced controls, visible error text — is release-blocking: rate it HIGH. A control that does not work in normal use is a core-function failure, not a presentation detail
+
+Caps bound severity; they never suppress a finding. When two caps apply, take the lower. A cap never outranks an explicit brief requirement — that requirement is what makes its absence release-blocking.
 
 For CRITICAL or HIGH findings, provide supporting evidence:
 - Trigger: what action or input triggers this (if known)
