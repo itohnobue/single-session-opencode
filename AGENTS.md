@@ -648,13 +648,15 @@ Classification labels are output formats, not answer decorations. Apply a label 
 
 When reporting problems or findings to the user, rate their severity so the user can prioritize:
 
+Judge every label against the brief as written and the intended use — never against an unstated ideal.
+
 | Level | Criteria |
 |-------|----------|
-| **None** | No functional impact. Comment, formatting, variable rename. |
-| **Low** | Code style, internal tooling, defence-in-depth, hypothetical, or an unprovable trigger; immediately reversible. |
+| **None** | No functional impact. |
+| **Low** | Cosmetic, internal, hypothetical, or an unprovable trigger; immediately reversible. |
 | **Medium** | User-visible but contained, or recoverable in one step; not release-blocking. |
-| **High** | Release-blocking: the deliverable would not go to its intended users as it stands — a requirement in the brief or its acceptance criteria is unmet, or normal use produces a failure that matters (wrong or lost data, exposed secrets, a core function that does not work). Judged against the brief as written and the intended use, not against an unstated ideal. |
-| **Critical** | Proven, irreversible harm — destroyed data, exposed secrets, auth bypass, or loss/crash in normal use with no guard preventing it. |
+| **High** | Release-blocking: would not ship to its intended users as it stands. |
+| **Critical** | Proven, irreversible harm — destroyed data, exposed secrets, auth bypass, or unrecoverable loss. |
 
 Findings-side copy: `.opencode/templates/severity-guide.txt` carries the same four levels for reviewers — change both together.
 
