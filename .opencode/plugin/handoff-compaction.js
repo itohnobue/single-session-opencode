@@ -2,15 +2,30 @@ import fs from "node:fs"
 import path from "node:path"
 
 // V2-only OpenCode plugin: replaces the built-in compaction summary with a
-// structured handoff (same 8-section template as the `handoff` skill), then
+// structured handoff (same 8-section structure as the `handoff` skill), then
 // prompts a one-shot restoration check on the next model call.
 //
 // V1: `server()` returns no hooks, so the plugin loads and does nothing.
 // V2: `setup()` registers the compaction and context hooks; if anything fails,
 // no result is set and OpenCode falls back to its own summary.
 //
-// The TEMPLATE constant mirrors `.opencode/skills/handoff/SKILL.md` — change both
-// together, then propagate.
+// Contract verified against OpenCode 2.1.4 (@opencode/plugin 2.1.4):
+//   - compaction hook event = SessionContext + `result?: SessionCompactionResult`
+//     (`{ summary, native?, metadata?, tokens? }`); setting `result` skips the
+//     model call. 2.1 renamed the old `providerState` field to `native`; this
+//     plugin sets `summary` only, so the rename does not apply.
+//   - `event.messages` are model-request messages (`@opencode/ai` Message:
+//     `{ role, content: [text | media | tool-call | tool-result | reasoning ...] }`),
+//     not persisted session messages — hence the tool-call/tool-result branches.
+//   - `ctx.session.generate({ sessionID, prompt })` resolves to `{ text }`.
+//   - 2.1.4 adds opt-in `experimental.background_compaction`: the summary is then
+//     prepared before the threshold, so this handoff (one full model call) runs
+//     there too and may be discarded unused.
+//
+// The TEMPLATE constant mirrors the 8-section STRUCTURE of
+// `.opencode/skills/handoff/SKILL.md`; the preamble and rules differ by design
+// (compaction replaces a live conversation, a skill handoff is a read file).
+// Change the section list in both together, then propagate.
 
 const DEFAULTS = {
   dir: ".opencode/handoff",
@@ -90,10 +105,28 @@ function truncate(text, limit) {
   return text.length <= limit ? text : `${text.slice(0, limit)}…`
 }
 
+function renderResult(result) {
+  if (!result || typeof result !== "object") return ""
+  if (result.type === "content" && Array.isArray(result.value)) {
+    return result.value.map((item) => item?.text ?? item?.uri ?? "").filter(Boolean).join("\n")
+  }
+  if (typeof result.value === "string") return result.value
+  return result.value === undefined ? "" : JSON.stringify(result.value)
+}
+
 function renderPart(part) {
   if (!part || typeof part !== "object") return ""
   if (part.type === "text") return part.text ?? ""
   if (part.type === "reasoning") return ""
+  // The compaction hook receives model-request parts (`@opencode/ai` Message):
+  // tool-call carries `input`, tool-result carries a `{type, value}` union.
+  if (part.type === "tool-call") {
+    return `[tool ${part.name ?? "?"}] input=${truncate(JSON.stringify(part.input ?? {}), 1200)}`
+  }
+  if (part.type === "tool-result") {
+    return `[tool ${part.name ?? "?"}] result=${truncate(renderResult(part.result), 2000)}`
+  }
+  // Persisted session-message shape, kept as a fallback: tool with a `state`.
   if (part.type === "tool") {
     const state = part.state ?? {}
     const input = truncate(JSON.stringify(state.input ?? {}), 1200)
@@ -102,6 +135,7 @@ function renderPart(part) {
       : ""
     return `[tool ${part.name ?? "?"}] input=${input} → ${truncate(output, 2000)}`
   }
+  if (part.type === "media") return "[media part]"
   return `[${part.type ?? "part"}] ${truncate(JSON.stringify(part), 800)}`
 }
 
