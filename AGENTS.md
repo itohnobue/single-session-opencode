@@ -227,6 +227,8 @@ All 8 agents are native opencode subagents, auto-loaded from `.opencode/agents/*
 
 **Parallel spawns — DEFAULT to concurrent:** whenever agents are independent, run them in parallel (multiple `task` calls in ONE message) — e.g., a second-opinion run's prepare alongside its primary executor, independent subtasks. Go SEQUENTIAL only when there is a real conflict: agents editing the same file, or a genuine dependency chain (B consumes A's output — e.g., an executor needs its research files first, adversarial needs the deliverable first). Keep parallel batches reasonable (up to 10 — raised to 15 when the independent subtask count is 11-15, so the whole set launches as one batch); coordination overhead grows with count.
 
+**Blocking spawns — MANDATORY.** Spawn with blocking `task` calls only; NEVER `background` or any async mode. Issue a batch as multiple blocking `task` calls in ONE message — they run concurrently and each returns only when its agent's whole turn is done; never top up a batch as individual calls return. A batch is complete only when returned calls equal issued calls; a report file, a clean `git status`, or a notification seen so far is never a completion signal, because an agent can still be working after writing its report. State the count when the batch closes (`N/N acknowledged`). No consumer — Build gate, review, adversarial, fix, post-fix, delivery — starts while any producer call is outstanding; a call whose result is unknown — interruption, or a spawn the harness ran in the background — is outstanding, not complete: wait for its notice, or resume or respawn the run if it is gone.
+
 **Spawn discipline:**
 - **One task per agent.** A subagent executes exactly one task and writes one report. No chained multi-task agents.
 - **No two agents edit the same file in parallel** (read overlap is fine). If parallel work needs the same file, split by content or sequence the agents.
@@ -242,7 +244,7 @@ All 8 agents are native opencode subagents, auto-loaded from `.opencode/agents/*
 
 ### Reviewing agent output
 
-- Check the report exists and is non-empty — that's the primary gate (for structural completeness of the named sections, see the structural-check note under Error Handling)
+- Check the report exists and is non-empty **after the spawn has returned** — report existence is the content gate, never a completion signal (for structural completeness of the named sections, see the structural-check note under Error Handling)
 - Read the report's findings and apply them to the main task
 - If an agent's output is wrong or incomplete: diagnose, fix the task, and re-spawn with corrections (see spawn discipline above)
 - Quality gates by pipeline stage: pre-spawn prompt check → prepare self-review → second-opinion flow (MEDIUM+) → optional VERIFY block (see VERIFY under Delegation Rules above), then the run-scoped **Build gate** whenever the run changed code (Quality Practices) — the delivery precondition.
