@@ -20,6 +20,7 @@ Features:
   (falls back to keyword-only if rank-bm25 is unavailable)
 - camelCase-aware BM25 tokenizer (CancellationError -> cancellation, error)
 - Recall echo on search ("Recalled N of M memories")
+- Atomic, round-trip-checked writes; one writer at a time (harvest rule)
 
 Usage:
     memory.sh add <category> <content> [--tags tag1,tag2]
@@ -49,12 +50,14 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import sys
+import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 try:
     from rank_bm25 import BM25Okapi
@@ -68,7 +71,11 @@ if sys.platform == "win32" and hasattr(sys.stdout, "buffer"):
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
-__version__ = "5.3.0"
+__version__ = "5.4.0"
+
+
+class StoreFormatError(RuntimeError):
+    """Rendered content would not parse back to the same entries."""
 
 
 # =============================================================================
@@ -209,12 +216,8 @@ def get_pointer_file_session() -> str | None:
 # FILE OPERATIONS
 # =============================================================================
 
-def parse_knowledge_file() -> list[Memory]:
-    """Parse knowledge.md into memory entries."""
-    if not KNOWLEDGE_FILE.exists():
-        return []
-
-    content = KNOWLEDGE_FILE.read_text(encoding="utf-8")
+def parse_knowledge_text(content: str) -> list[Memory]:
+    """Parse knowledge.md text into memory entries."""
     pattern = r'^## \[([^\]]+)\](.*?)(?=^## \[|\Z)'
     matches = re.findall(pattern, content, re.MULTILINE | re.DOTALL)
 
@@ -257,8 +260,15 @@ def parse_knowledge_file() -> list[Memory]:
     return memories
 
 
-def write_knowledge_file(memories: list[Memory]) -> None:
-    """Write all memories to knowledge.md."""
+def parse_knowledge_file() -> list[Memory]:
+    """Parse knowledge.md into memory entries."""
+    if not KNOWLEDGE_FILE.exists():
+        return []
+    return parse_knowledge_text(KNOWLEDGE_FILE.read_text(encoding="utf-8"))
+
+
+def render_knowledge(memories: list[Memory]) -> str:
+    """Render memories as knowledge.md text."""
     lines = ["# Knowledge Base\n"]
     lines.append(f"Last updated: {datetime.now().isoformat()}\n\n")
 
@@ -271,15 +281,69 @@ def write_knowledge_file(memories: list[Memory]) -> None:
             lines.append(f"Changed: {memory.changed_at}\n")
         lines.append(f"\n{memory.content}\n\n")
 
-    KNOWLEDGE_FILE.write_text("".join(lines), encoding="utf-8")
+    return "".join(lines)
 
 
-def parse_session_file() -> list[SessionEntry]:
-    """Parse session.md into session entries."""
-    if not SESSION_FILE.exists():
-        return []
+def _atomic_replace(path: Path, text: str) -> None:
+    """Publish text atomically: unique temp, fsync, os.replace."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(
+        dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        if path.exists():
+            os.chmod(tmp_name, path.stat().st_mode & 0o777)
+        os.replace(tmp_name, path)
+    except BaseException:
+        try:
+            os.unlink(tmp_name)
+        except FileNotFoundError:
+            pass
+        raise
 
-    content = SESSION_FILE.read_text(encoding="utf-8")
+
+def _mutate_store(
+    path: Path,
+    parse_text: Callable[[str], list[Any]],
+    render: Callable[[list[Any]], str],
+    mutate: Callable[[list[Any]], list[Any]],
+) -> list[Any]:
+    """Read, mutate, guard, and publish atomically.
+
+    Single writer at a time: the workflow's harvest rule owns this discipline.
+    The round-trip guard refuses content that would not parse back identically;
+    the atomic replace keeps readers from seeing a partial file.
+    """
+    raw = path.read_text(encoding="utf-8") if path.exists() else ""
+    entries = parse_text(raw)
+    new_entries = mutate(entries)
+    text = render(new_entries)
+    if parse_text(text) != new_entries:
+        raise StoreFormatError(
+            "refusing to write: the entry content contains a line that parses as "
+            "entry structure (a '## [id]' header or a Category:/Tags:/Changed: line). "
+            "Indent or escape that line, then retry."
+        )
+    _atomic_replace(path, text)
+    return new_entries
+
+
+def write_knowledge_file(memories: list[Memory]) -> None:
+    """Write all memories atomically with a round-trip guard."""
+    text = render_knowledge(memories)
+    if parse_knowledge_text(text) != memories:
+        raise StoreFormatError(
+            "refusing to write knowledge.md: content would not parse back to the same entries"
+        )
+    _atomic_replace(KNOWLEDGE_FILE, text)
+
+
+def parse_session_text(content: str) -> list[SessionEntry]:
+    """Parse session.md text into session entries."""
     pattern = r'^## \[([^\]]+)\](.*?)(?=^## \[|\Z)'
     matches = re.findall(pattern, content, re.MULTILINE | re.DOTALL)
 
@@ -328,8 +392,15 @@ def parse_session_file() -> list[SessionEntry]:
     return entries
 
 
-def write_session_file(entries: list[SessionEntry]) -> None:
-    """Write all session entries to session.md."""
+def parse_session_file() -> list[SessionEntry]:
+    """Parse session.md into session entries."""
+    if not SESSION_FILE.exists():
+        return []
+    return parse_session_text(SESSION_FILE.read_text(encoding="utf-8"))
+
+
+def render_session(entries: list[SessionEntry]) -> str:
+    """Render entries as session.md text."""
     lines = ["# Session Memory\n"]
     lines.append(f"Last updated: {datetime.now().isoformat()}\n\n")
 
@@ -343,7 +414,17 @@ def write_session_file(entries: list[SessionEntry]) -> None:
             lines.append(f"Changed: {entry.changed_at}\n")
         lines.append(f"\n{entry.content}\n\n")
 
-    SESSION_FILE.write_text("".join(lines), encoding="utf-8")
+    return "".join(lines)
+
+
+def write_session_file(entries: list[SessionEntry]) -> None:
+    """Write all session entries atomically with a round-trip guard."""
+    text = render_session(entries)
+    if parse_session_text(text) != entries:
+        raise StoreFormatError(
+            "refusing to write session.md: content would not parse back to the same entries"
+        )
+    _atomic_replace(SESSION_FILE, text)
 
 
 # =============================================================================
@@ -513,11 +594,16 @@ def generate_session_id(category: str, content: str) -> str:
 
 def cmd_add(category: str, content: str, tags: list[str] | None = None) -> dict[str, Any]:
     """Add a new memory."""
+    content = content.strip()
+    if not content:
+        return {"status": "error", "message": "Content cannot be empty"}
+
     # Validate category
     cat_lower = category.lower()
     if cat_lower not in CATEGORIES:
         cat_lower = "misc"
 
+    normalized_tags = [t.strip() for t in (tags or []) if t.strip()]
     memory_id = generate_memory_id(cat_lower, content)
     now = datetime.now().isoformat()
 
@@ -525,14 +611,16 @@ def cmd_add(category: str, content: str, tags: list[str] | None = None) -> dict[
         id=memory_id,
         category=cat_lower,
         content=content,
-        tags=tags or [],
+        tags=normalized_tags,
         changed_at=now,
     )
 
-    # Add to file
-    memories = parse_knowledge_file()
-    memories.append(memory)
-    write_knowledge_file(memories)
+    _mutate_store(
+        KNOWLEDGE_FILE,
+        parse_knowledge_text,
+        render_knowledge,
+        lambda memories: memories + [memory],
+    )
 
     return {
         "status": "success",
@@ -601,15 +689,19 @@ def cmd_list(category: str | None = None, limit: int = 50) -> dict[str, Any]:
 
 def cmd_delete(memory_id: str) -> dict[str, Any]:
     """Delete a memory."""
-    memories = parse_knowledge_file()
-    original_count = len(memories)
-    memories = [m for m in memories if m.id != memory_id]
 
-    if len(memories) < original_count:
-        write_knowledge_file(memories)
-        return {"status": "success", "message": f"Deleted: {memory_id}"}
+    def mutate(memories: list[Memory]) -> list[Memory]:
+        kept = [m for m in memories if m.id != memory_id]
+        if len(kept) == len(memories):
+            raise KeyError(memory_id)
+        return kept
 
-    return {"status": "error", "message": f"Not found: {memory_id}"}
+    try:
+        _mutate_store(KNOWLEDGE_FILE, parse_knowledge_text, render_knowledge, mutate)
+    except KeyError:
+        return {"status": "error", "message": f"Not found: {memory_id}"}
+
+    return {"status": "success", "message": f"Deleted: {memory_id}"}
 
 
 def cmd_update(
@@ -622,31 +714,44 @@ def cmd_update(
     if content is None and tags is None and category is None:
         return {"status": "error", "message": "Nothing to update"}
 
+    if content is not None:
+        content = content.strip()
+        if not content:
+            return {"status": "error", "message": "Content cannot be empty"}
+
     if category is not None and category.lower() not in CATEGORIES:
         return {
             "status": "error",
             "message": f"Invalid category: {category}. Valid: {', '.join(CATEGORIES)}",
         }
 
-    memories = parse_knowledge_file()
-    for memory in memories:
-        if memory.id != memory_id:
-            continue
-        if content is not None:
-            memory.content = content
-        if tags is not None:
-            memory.tags = tags
-        if category is not None:
-            memory.category = category.lower()
-        memory.changed_at = datetime.now().isoformat()
-        write_knowledge_file(memories)
-        return {
-            "status": "success",
-            "message": f"Updated: {memory_id}",
-            "memory": memory.to_dict(),
-        }
+    updated: dict[str, Memory] = {}
 
-    return {"status": "error", "message": f"Not found: {memory_id}"}
+    def mutate(memories: list[Memory]) -> list[Memory]:
+        for memory in memories:
+            if memory.id != memory_id:
+                continue
+            if content is not None:
+                memory.content = content
+            if tags is not None:
+                memory.tags = [t.strip() for t in tags if t.strip()]
+            if category is not None:
+                memory.category = category.lower()
+            memory.changed_at = datetime.now().isoformat()
+            updated["memory"] = memory
+            return memories
+        raise KeyError(memory_id)
+
+    try:
+        _mutate_store(KNOWLEDGE_FILE, parse_knowledge_text, render_knowledge, mutate)
+    except KeyError:
+        return {"status": "error", "message": f"Not found: {memory_id}"}
+
+    return {
+        "status": "success",
+        "message": f"Updated: {memory_id}",
+        "memory": updated["memory"].to_dict(),
+    }
 
 
 def cmd_stats() -> dict[str, Any]:
@@ -748,6 +853,10 @@ def cmd_session_add(
     session: str | None = None,
 ) -> dict[str, Any]:
     """Add a session entry."""
+    content = content.strip()
+    if not content:
+        return {"status": "error", "message": "Content cannot be empty"}
+
     cat_lower = category.lower()
     if cat_lower not in SESSION_CATEGORIES:
         cat_lower = "note"
@@ -768,9 +877,12 @@ def cmd_session_add(
         changed_at=now,
     )
 
-    entries = parse_session_file()
-    entries.append(entry)
-    write_session_file(entries)
+    _mutate_store(
+        SESSION_FILE,
+        parse_session_text,
+        render_session,
+        lambda entries: entries + [entry],
+    )
 
     return {
         "status": "success",
@@ -838,33 +950,44 @@ def cmd_session_update(entry_id: str, status: str) -> dict[str, Any]:
     if status.lower() not in SESSION_STATUSES:
         return {"status": "error", "message": f"Invalid status. Valid: {', '.join(SESSION_STATUSES)}"}
 
-    entries = parse_session_file()
+    updated: dict[str, SessionEntry] = {}
 
-    for entry in entries:
-        if entry.id == entry_id:
-            entry.status = status.lower()
-            entry.changed_at = datetime.now().isoformat()
-            write_session_file(entries)
-            return {
-                "status": "success",
-                "message": f"Updated: {entry_id}",
-                "entry": entry.to_dict(),
-            }
+    def mutate(entries: list[SessionEntry]) -> list[SessionEntry]:
+        for entry in entries:
+            if entry.id == entry_id:
+                entry.status = status.lower()
+                entry.changed_at = datetime.now().isoformat()
+                updated["entry"] = entry
+                return entries
+        raise KeyError(entry_id)
 
-    return {"status": "error", "message": f"Not found: {entry_id}"}
+    try:
+        _mutate_store(SESSION_FILE, parse_session_text, render_session, mutate)
+    except KeyError:
+        return {"status": "error", "message": f"Not found: {entry_id}"}
+
+    return {
+        "status": "success",
+        "message": f"Updated: {entry_id}",
+        "entry": updated["entry"].to_dict(),
+    }
 
 
 def cmd_session_delete(entry_id: str) -> dict[str, Any]:
     """Delete a session entry."""
-    entries = parse_session_file()
-    original_count = len(entries)
-    entries = [e for e in entries if e.id != entry_id]
 
-    if len(entries) < original_count:
-        write_session_file(entries)
-        return {"status": "success", "message": f"Deleted: {entry_id}"}
+    def mutate(entries: list[SessionEntry]) -> list[SessionEntry]:
+        kept = [e for e in entries if e.id != entry_id]
+        if len(kept) == len(entries):
+            raise KeyError(entry_id)
+        return kept
 
-    return {"status": "error", "message": f"Not found: {entry_id}"}
+    try:
+        _mutate_store(SESSION_FILE, parse_session_text, render_session, mutate)
+    except KeyError:
+        return {"status": "error", "message": f"Not found: {entry_id}"}
+
+    return {"status": "success", "message": f"Deleted: {entry_id}"}
 
 
 def cmd_session_clear(
@@ -876,29 +999,27 @@ def cmd_session_clear(
     If clear_all=True, clears ALL sessions.
     Otherwise, clears only the current session's entries.
     """
-    entries = parse_session_file()
-
     if clear_all:
         # Clear everything
-        count = len(entries)
+        count = len(parse_session_file())
         if SESSION_FILE.exists():
             SESSION_FILE.unlink()
         return {"status": "success", "message": f"Cleared all {count} entries from all sessions"}
 
     # Clear only current session
     current_session = get_current_session(session)
-    original_count = len(entries)
-    entries = [e for e in entries if e.session != current_session]
-    cleared_count = original_count - len(entries)
+    cleared = {"count": 0}
 
-    if entries:
-        write_session_file(entries)
-    elif SESSION_FILE.exists():
-        SESSION_FILE.unlink()
+    def mutate(current: list[SessionEntry]) -> list[SessionEntry]:
+        kept = [e for e in current if e.session != current_session]
+        cleared["count"] = len(current) - len(kept)
+        return kept
+
+    _mutate_store(SESSION_FILE, parse_session_text, render_session, mutate)
 
     return {
         "status": "success",
-        "message": f"Cleared {cleared_count} entries from session '{current_session}'",
+        "message": f"Cleared {cleared['count']} entries from session '{current_session}'",
         "session": current_session,
     }
 
@@ -906,42 +1027,55 @@ def cmd_session_clear(
 def cmd_session_archive(entry_id: str, category: str | None = None) -> dict[str, Any]:
     """Archive a session entry to knowledge."""
     entries = parse_session_file()
+    target = next((e for e in entries if e.id == entry_id), None)
+    if target is None:
+        return {"status": "error", "message": f"Not found: {entry_id}"}
 
-    for entry in entries:
-        if entry.id == entry_id:
-            # Determine target category
-            target_cat = category.lower() if category else entry.category
-            if target_cat not in CATEGORIES:
-                target_cat = "discovery"
+    # Determine target category
+    target_cat = category.lower() if category else target.category
+    if target_cat not in CATEGORIES:
+        target_cat = "discovery"
 
-            # Create memory
-            memory_id = generate_memory_id(target_cat, entry.content)
-            now = datetime.now().isoformat()
+    # Create memory
+    memory_id = generate_memory_id(target_cat, target.content)
+    now = datetime.now().isoformat()
 
-            memory = Memory(
-                id=memory_id,
-                category=target_cat,
-                content=entry.content,
-                tags=[],
-                changed_at=now,
-            )
+    memory = Memory(
+        id=memory_id,
+        category=target_cat,
+        content=target.content,
+        tags=[],
+        changed_at=now,
+    )
 
-            # Add to knowledge
-            memories = parse_knowledge_file()
-            memories.append(memory)
-            write_knowledge_file(memories)
+    # Add to knowledge, then remove from session. Two stores, two atomic writes;
+    # the duplicate-on-failure window is unchanged from the previous behavior.
+    _mutate_store(
+        KNOWLEDGE_FILE,
+        parse_knowledge_text,
+        render_knowledge,
+        lambda memories: memories + [memory],
+    )
 
-            # Remove from session
-            entries = [e for e in entries if e.id != entry_id]
-            write_session_file(entries)
+    def remove(entries: list[SessionEntry]) -> list[SessionEntry]:
+        kept = [e for e in entries if e.id != entry_id]
+        if len(kept) == len(entries):
+            raise KeyError(entry_id)
+        return kept
 
-            return {
-                "status": "success",
-                "message": f"Archived: {entry_id} -> {memory_id}",
-                "memory": memory.to_dict(),
-            }
+    try:
+        _mutate_store(SESSION_FILE, parse_session_text, render_session, remove)
+    except KeyError:
+        return {
+            "status": "error",
+            "message": f"Knowledge entry {memory_id} was written, but session entry {entry_id} disappeared concurrently",
+        }
 
-    return {"status": "error", "message": f"Not found: {entry_id}"}
+    return {
+        "status": "success",
+        "message": f"Archived: {entry_id} -> {memory_id}",
+        "memory": memory.to_dict(),
+    }
 
 
 def cmd_session_use(session_name: str) -> dict[str, Any]:

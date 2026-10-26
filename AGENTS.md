@@ -305,7 +305,7 @@ Two-tier: **Knowledge** (`knowledge.md`) permanent, **Session** (`session.md`) t
 | `architecture` | System design, service connections, ports |
 | `gotcha` | Bugs, pitfalls, non-obvious behavior |
 | `pattern` | Code conventions, recurring structures |
-| `config` | Environment settings, credentials |
+| `config` | Environment settings; credential references only (name, env var, secret-store path), never values |
 | `entity` | Important classes, functions, APIs |
 | `decision` | Why choices were made |
 | `discovery` | New findings about codebase |
@@ -314,6 +314,8 @@ Two-tier: **Knowledge** (`knowledge.md`) permanent, **Session** (`session.md`) t
 | `context` | Background info, project context |
 
 **Tags:** Cross-cutting concerns (e.g., `--tags redis,production,auth`). **Skip:** Trivial, easily grep-able, duplicates.
+
+**Never store credential values** in `knowledge.md` or `session.md` — passwords, tokens, private keys, or connection strings with embedded secrets. Store a reference instead: secret name, env var, or secret-store path.
 
 **Escaped defects:** logged in `escapes.md` at the repo root (append-only, one row per defect found after delivery); the generalizable rule is harvested into `knowledge.md` under the `escape` tag so prior-art searches surface it.
 
@@ -324,8 +326,11 @@ Two-tier: **Knowledge** (`knowledge.md`) permanent, **Session** (`session.md`) t
 2. **Check old knowledge on the matter** — for every existing entry the task touched: outdated/incorrect → `delete` (reasons go in the report line below); partially right → `update <id>` in place (content/tags/category), never delete+re-add; still correct → leave untouched. Conservative: prefer silence over noise; never delete without clear evidence
 3. **Add new learnings** — categorized (see table above), tagged. **Shape rule — "lessons not logs":** an entry states the generalizable rule plus one clause of *why* — the mechanism OR the evidence that earned the claim (the measurement, the ruling, the failure that made the difference), attached to the step it affects — stated once. A promoted claim carries its warrant: a rule with no warrant cannot be falsified later, so it can never be demoted. No incident narration, no PR/issue/commit numbers, no dates, no quoted chat; strip environment-specific one-off state (it belongs in git history). The rule must stand without the story behind it. **Cited digests:** when an entry cites a file digest, state its coverage — whole-file (saying whether a trailing newline is hashed), or the file plus an exact span. Cite the path with line/section as the authority and keep the digest only to date the citation. A commit SHA, and a digest taken to COMPARE two files (the propagation drift guard), need no coverage statement
    **Escaped defects:** when a defect was found after delivery, record in `tmp/knowledge-harvest-report.md`: which stage should have caught it, what that stage lacked, and where the prevention landed — a template line, a lint rule, a test, or a knowledge entry — or why none is possible. Write one row in `escapes.md` (create it with that six-column header when absent; `Date | Defect | Stage that should have caught it | What it lacked | Prevention landed | Status`) and add a `gotcha` entry tagged `escape,<stage>,<domain>` stating the generalizable rule and the enforcement artifact, cross-referenced to the row — the log holds the trace, the entry holds the rule. Fires only for escaped defects, never for findings the run caught; no retroactive rows.
-4. **Commit + push knowledge.md (tracked repos only)** — once all memory writes are done: if the file is tracked by git (`git ls-files --error-unmatch knowledge.md` succeeds) and changed (`git status --porcelain knowledge.md`), commit and push it — `git commit -m "memory: knowledge update" -- knowledge.md && git push`; when `escapes.md` exists and changed, add it as a second path (`-- escapes.md`) to the same commit. The pathspec keeps other staged/dirty changes out. Untracked/ignored/non-git → skip silently; a failed push (no remote/upstream) is reported, never forced
-5. **Report** — "Memories saved: [list]; updated: [list]; retired: [list] (reasons)" or "Memories saved: None"; append the VCS outcome — e.g. "knowledge.md committed+pushed" / "VCS: skipped (untracked)" / "VCS: push failed (<reason>)"
+4. **Store lint** — if this harvest changed `knowledge.md`, run `./.opencode/tools/memory.sh check`; triage each similarity candidate (update in place, retire with evidence, or leave with a reason; never auto-merge). Record `check: N candidates, M updated, K retired, L left` in the harvest report when candidates exist
+5. **Commit + push knowledge.md (tracked repos only)** — once all memory writes are done: if the file is tracked by git (`git ls-files --error-unmatch knowledge.md` succeeds) and changed (`git status --porcelain knowledge.md`), commit and push it — `git commit -m "memory: knowledge update" -- knowledge.md && git push`; when `escapes.md` exists and changed, add it as a second path (`-- escapes.md`) to the same commit. The pathspec keeps other staged/dirty changes out. Untracked/ignored/non-git → skip silently; a failed push (no remote/upstream) is reported, never forced
+6. **Report** — "Memories saved: [list]; updated: [list]; retired: [list] (reasons)" or "Memories saved: None"; append the VCS outcome — e.g. "knowledge.md committed+pushed" / "VCS: skipped (untracked)" / "VCS: push failed (<reason>)"
+
+**Single writer:** the store is not locked — never run two harvests or two memory writers concurrently.
 
 **Subagent read access (READ-ONLY):** subagents are read-only consumers of the memory system — the coordination templates tell them to run prior-art `memory.sh search` / `list` (or read `knowledge.md`) before starting work as a cheap prior-art check, and to report the result in one line. They NEVER `add` / `update` / `delete` / `session.*` — all writes stay the main model's exclusive job (adds, updates, deletes, sessions, harvesting).
 
@@ -533,7 +538,7 @@ R3. Python — always via uv; no global pip installs, no repo venvs
   - uv lives at $REPO_ROOT/tmp/uv/ (bootstrap once: UV_INSTALL_DIR +
     UV_NO_MODIFY_PATH) — never ~/.local/bin, never profile edits
   - before a parallel agent fan-out, ensure uv is already installed
-    (`tmp/uv/uv --version`); never let parallel subagents bootstrap it
+    (`tmp/uv/uv --version` or one `memory.sh` call); never let parallel subagents bootstrap it
     simultaneously — first-install races can corrupt the binary
   - CodeGraph bootstraps repo-locally into tmp/codegraph/ on first use (same
     rule: never let parallel subagents bootstrap it simultaneously)
