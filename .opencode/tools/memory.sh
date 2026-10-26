@@ -23,6 +23,6 @@ if ! "$UV_BIN" --version >/dev/null 2>&1; then
     fi
 fi
 
-# Run with uv (no inline deps in memory.py — stdlib only)
+# Run with uv (memory.py declares its dependencies in its PEP 723 header)
 # Unset PYTHONPATH to avoid conflicts with system Python packages
 env -u PYTHONPATH "$UV_BIN" run --no-project "$SCRIPT_DIR/memory.py" "$@"

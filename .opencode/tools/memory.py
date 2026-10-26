@@ -4,7 +4,7 @@
 # dependencies = ["rank-bm25>=0.2.2"]
 # ///
 """
-Model Memory Tool v5.3.0 - Multi-Signal Retrieval Edition
+Model Memory Tool v5.4.0 - Multi-Signal Retrieval Edition
 
 A simple, focused persistent memory system for OpenCode.
 Session isolation for parallel work. Multi-signal retrieval:
@@ -1286,7 +1286,7 @@ def format_output(data: dict[str, Any], fmt: str = "text") -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Model Memory Tool v5.1.0 - Session Isolation Edition",
+        description="Model Memory Tool v5.4.0 - Multi-Signal Retrieval Edition",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=f"""
 Commands:
