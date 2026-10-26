@@ -25,7 +25,7 @@ Workflow files: `AGENTS.md`, `.opencode/` (agents, templates, tools, plugin), an
 
 NEVER create, edit, move, rename, or delete one without an explicit user command naming the file or the change. General tasks ("update the workflow", "sync the repos", "audit AGENTS.md"), prior sessions, and side effects of other tasks do not grant it. Reading is always allowed — report and propose instead.
 
-**Harness-change acceptance (MANDATORY).** When a workflow-file change is motivated by an observed failure, record two things in the change's commit message: the failure signature — the exact text or behavior that was missing or wrong — and the observable that proves the change landed (a report section, a counted line, a gate verdict, a grep). Check that observable in the next run that exercises the changed path. If the signature recurs, the change did not work — revise or revert it. If the failure has no mechanical signature, mark the change unverified in the commit message.
+**Harness-change acceptance (MANDATORY).** When a workflow-file change is motivated by an observed failure, record two things with the change — in its commit message, or in the delivery line when the repo is not git: the failure signature, the exact text or behavior that was missing or wrong, and the observable that proves the change landed (a report section, a counted line, a gate verdict, a grep). Check that observable in the next run that exercises the changed path. If the signature recurs, the change did not work — revise or revert it. If the failure has no mechanical signature, mark the change unverified.
 
 ---
 
@@ -650,7 +650,7 @@ TOOL-CHOICE LADDER (one question, one tool): "how does X flow / chain across mod
   - **Changed / found** — what changed or what was found; severity labels where the Reporting rules require them; artifacts cited, never pasted (Communication Style rule 4).
   - **Verified** — one line per check that ran in THIS session, each with its exact command; unresolved items one line each (uncertainty about a claim stays inline with it, per rule 4). A check run in an earlier session does not belong here.
   - Code changed in this run → the **Build gate** ran with a stated scope and passed (Quality Practices). A gate that could not run is reported as unavailable with the reason — never omitted.
-  - Workflow file changed in this run → its commit message carries the **harness-change acceptance** line: failure signature + observable, or `unverified` (see Workflow Files).
+  - Workflow file changed in this run → the **harness-change acceptance** line is recorded with it: failure signature + observable, or `unverified` (see Workflow Files).
 - Clean up temporary task files: `rm -f tmp/*-task-prompt.txt tmp/*-task.txt`
   (keep reports, logs, memory; NEVER delete tmp/uv/ — it's the locally
   installed uv binary per the tool-use policy; removing it forces a
