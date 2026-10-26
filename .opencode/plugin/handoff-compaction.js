@@ -5,6 +5,11 @@ import path from "node:path"
 // structured handoff (same 8-section structure as the `handoff` skill), then
 // prompts a one-shot restoration check on the next model call.
 //
+// It also writes a verbatim evidence log — user text, tool calls and full tool
+// results, no assistant prose — to tmp/handoff-evidence/, and points the
+// restoration prompt at it, so exact quotes, error text and command output
+// survive after the conversation is replaced.
+//
 // V1: `server()` returns no hooks, so the plugin loads and does nothing.
 // V2: `setup()` registers the compaction and context hooks; if anything fails,
 // no result is set and OpenCode falls back to its own summary.
@@ -31,6 +36,17 @@ const DEFAULTS = {
   dir: ".opencode/handoff",
   timeoutMs: 120000,
   maxChars: 400000,
+}
+
+// Verbatim pre-compaction evidence, so exact quotes, error text and command
+// output survive after the conversation is replaced. Tool output can contain
+// secrets, so the directory carries a local `.gitignore` (`*`) — a repo whose
+// own .gitignore does not cover tmp/ still cannot stage the log.
+const EVIDENCE = {
+  dir: "tmp/handoff-evidence",
+  cap: 5 * 1024 * 1024,
+  keep: 2,
+  inputLimit: 1200,
 }
 
 const TEMPLATE = `HANDOFF — <task/session name>   (as of <timestamp>, written before compaction)
@@ -102,7 +118,11 @@ function log(ctx, line) {
 
 function truncate(text, limit) {
   if (typeof text !== "string") return ""
-  return text.length <= limit ? text : `${text.slice(0, limit)}…`
+  if (text.length <= limit) return text
+  if (limit <= 4) return text.slice(0, limit)
+  const head = Math.max(1, Math.floor(limit * 0.25))
+  const tail = Math.max(1, limit - head - 1)
+  return `${text.slice(0, head)}…${text.slice(-tail)}`
 }
 
 function renderResult(result) {
@@ -151,6 +171,93 @@ function renderMessages(messages) {
   return blocks.join("\n\n")
 }
 
+function safeSessionId(sessionID) {
+  return String(sessionID ?? "unknown").replace(/[^A-Za-z0-9._-]/g, "_")
+}
+
+// Full tool results, user text and tool-call inputs. Assistant prose stays out:
+// the handoff carries decisions, this log carries evidence.
+function renderEvidencePart(part) {
+  if (!part || typeof part !== "object") return ""
+  if (part.type === "reasoning") return ""
+  if (part.type === "tool-call") {
+    return `[tool ${part.name ?? "?"}] input=${truncate(JSON.stringify(part.input ?? {}), EVIDENCE.inputLimit)}`
+  }
+  if (part.type === "tool-result") {
+    return `[tool ${part.name ?? "?"}] result=${renderResult(part.result)}`
+  }
+  if (part.type === "tool") {
+    const state = part.state ?? {}
+    const input = truncate(JSON.stringify(state.input ?? {}), EVIDENCE.inputLimit)
+    const output = Array.isArray(state.content)
+      ? state.content.map((item) => item?.text ?? "").join("\n")
+      : ""
+    return `[tool ${part.name ?? "?"}] input=${input} → ${output}`
+  }
+  if (part.type === "media") return "[media part]"
+  return ""
+}
+
+function renderEvidence(messages) {
+  const blocks = []
+  for (const message of messages) {
+    const role = message?.role ?? "unknown"
+    const parts = Array.isArray(message?.content) ? message.content : []
+    const body = parts
+      .map((part) => {
+        if (part?.type === "text") return role === "user" ? part.text ?? "" : ""
+        return renderEvidencePart(part)
+      })
+      .filter(Boolean)
+      .join("\n")
+    if (body.trim() === "") continue
+    blocks.push(`### ${role}\n${body}`)
+  }
+  return blocks.join("\n\n")
+}
+
+function capEvidence(text) {
+  if (text.length <= EVIDENCE.cap) return text
+  const head = Math.floor(EVIDENCE.cap * 0.2)
+  const tail = EVIDENCE.cap - head
+  return `${text.slice(0, head)}\n\n[... ${text.length - EVIDENCE.cap} characters omitted from the middle; evidence log capped ...]\n\n${text.slice(-tail)}`
+}
+
+function pruneEvidence(directory, sessionID) {
+  const prefix = `${safeSessionId(sessionID)}-`
+  try {
+    const names = fs
+      .readdirSync(directory)
+      .filter((name) => name.startsWith(prefix) && name.endsWith(".evidence.txt"))
+      .sort()
+    for (const name of names.slice(0, Math.max(0, names.length - EVIDENCE.keep))) {
+      try {
+        fs.unlinkSync(path.join(directory, name))
+      } catch {}
+    }
+  } catch {}
+}
+
+function writeEvidence(ctx, event, sessionID) {
+  const messages = Array.isArray(event.messages) ? event.messages : []
+  const transcript = renderEvidence(messages)
+  if (transcript.trim() === "") return null
+  const directory = path.join(ctx.location?.directory ?? process.cwd(), EVIDENCE.dir)
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-")
+  const file = path.join(directory, `${safeSessionId(sessionID)}-${stamp}.evidence.txt`)
+  try {
+    fs.mkdirSync(directory, { recursive: true })
+    const ignoreFile = path.join(directory, ".gitignore")
+    if (!fs.existsSync(ignoreFile)) fs.writeFileSync(ignoreFile, "*\n")
+    fs.writeFileSync(file, `${capEvidence(transcript)}\n`)
+    pruneEvidence(directory, sessionID)
+    return file
+  } catch (error) {
+    log(ctx, `evidence write failed: ${error?.message ?? error}`)
+    return null
+  }
+}
+
 function clampTranscript(text, maxChars) {
   if (text.length <= maxChars) return text
   const head = Math.floor(maxChars * 0.25)
@@ -197,8 +304,10 @@ function normalize(output) {
     .trim()
 }
 
-function restorationLine(file) {
-  return `RESTORATION: the full handoff is saved at ${file}. Before acting on any claim above, confirm it against the workspace by opening the cited paths and lines; then continue from Next Step. Do not redo work the handoff records as done.`
+function restorationLine(file, evidence) {
+  const base = `RESTORATION: the full handoff is saved at ${file}. Before acting on any claim above, confirm it against the workspace by opening the cited paths and lines; then continue from Next Step. Do not redo work the handoff records as done.`
+  if (!evidence) return base
+  return `${base} Verbatim pre-compaction tool evidence is at ${evidence} — grep it for exact quotes, error text and command output; do not read it whole.`
 }
 
 function withTimeout(promise, timeoutMs) {
@@ -260,8 +369,11 @@ async function authorHandoff(ctx, event) {
     log(ctx, `write failed: ${error?.message ?? error}`)
   }
 
-  pendingRestoration.set(sessionID, { file: targetFile, at: Date.now() })
-  event.result = { summary: `${handoff}\n\n${restorationLine(targetFile)}` }
+  const evidence = writeEvidence(ctx, event, sessionID)
+  if (evidence !== null) log(ctx, `evidence written path=${evidence}`)
+
+  pendingRestoration.set(sessionID, { file: targetFile, evidence, at: Date.now() })
+  event.result = { summary: `${handoff}\n\n${restorationLine(targetFile, evidence)}` }
   log(ctx, `summary set chars=${event.result.summary.length}`)
 }
 
@@ -286,9 +398,12 @@ export default {
           return
         }
         pendingRestoration.delete(sessionID)
+        const evidenceLine = state.evidence
+          ? ` Verbatim pre-compaction tool evidence is at ${state.evidence} — grep it for exact quotes, error text and command output; do not read it whole.`
+          : ""
         event.system.push({
           type: "text",
-          text: `Compaction just replaced this session's earlier conversation with a handoff summary. The full handoff is at ${state.file}. Before acting on any claim in that summary, open the cited paths and lines and confirm it against the workspace; then continue from Next Step. Do not redo work the handoff records as done.`,
+          text: `Compaction just replaced this session's earlier conversation with a handoff summary. The full handoff is at ${state.file}. Before acting on any claim in that summary, open the cited paths and lines and confirm it against the workspace; then continue from Next Step. Do not redo work the handoff records as done.${evidenceLine}`,
         })
         log(ctx, `restoration injected session=${sessionID}`)
       } catch (error) {
