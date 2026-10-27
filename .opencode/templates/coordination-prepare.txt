@@ -12,9 +12,6 @@ MEMORY USE (READ-ONLY):
 - Missing tool or failed search: continue immediately, no retries.
 - Report one line: Memory search: "<query>" -> N relevant (<short summary>) — or "memory not available".
 
-COORDINATION:
-- After EACH subtask, append new results to report (Read existing content first, then Write full updated report)
-
 AUTONOMY (MANDATORY):
 - NEVER ask the operator questions, request approval or confirmation, or ask "should I continue?" — this includes the `question` tool. The operator is not part of the execution loop.
 - Decide the best option yourself on sight with best judgment; document the decision and reasoning in your report.

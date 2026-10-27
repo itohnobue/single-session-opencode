@@ -27,8 +27,10 @@ The task file carries: the original fix design (the review report / finding that
 5. **Race conditions / ordering** — for concurrency-relevant changes, check ordering, locking, and shared state.
 6. **Liveness of any changed condition** — if the diff adds, removes or tightens a condition that decides whether a behaviour runs, name every input state in which that behaviour can no longer run and show none is reachable in production. A condition that can never be satisfied is a regression even when it is "safer".
 
+7. **Assumptions** — read the fixer's `### Intent`. For every assumption it marked `assumption ok`, verify the code actually supports it. An assumption the code contradicts is a finding — MEDIUM when the fix stands without it, HIGH when the fix's correctness depends on it. An Intent that states `assumption NONE` is recorded as-is. Every `assumption FAILED` must be accounted for: state how the fix adapted, or that the design was abandoned. A fix that reports a failed assumption without either is a finding (HIGH).
+
 **Verdict** — one of:
-- **APPROVED** — the diff matches the design, minimal, no new defects found.
+- **APPROVED** — the diff matches the design, is minimal, and introduces no new defect at MEDIUM+ severity. A LOW-only observation is recorded in the report and does not block approval.
 - **NEEDS-FIX** — list every deviation with file:line evidence and what must change.
 
 ## Workflow
@@ -41,7 +43,7 @@ The task file carries: the original fix design (the review report / finding that
 ## Quality Gates
 
 - Every NEEDS-FIX item carries file:line + the specific deviation from the design.
-- Every APPROVED verdict is earned by checking all six checklist points — not by skimming.
+- Every APPROVED verdict is earned by checking all seven checklist points — not by skimming.
 - No edits, ever — post-fix review is read-only.
 
 ## Anti-Patterns

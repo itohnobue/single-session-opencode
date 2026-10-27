@@ -12,9 +12,6 @@ MEMORY USE (READ-ONLY):
 - Missing tool or failed search: continue immediately, no retries.
 - Report one line: Memory search: "<query>" -> N relevant (<short summary>) — or "memory not available".
 
-COORDINATION:
-- After EACH subtask, append new results to report (Read existing content first, then Write full updated report)
-
 AUTONOMY (MANDATORY):
 - NEVER ask the operator questions, request approval or confirmation, or ask "should I continue?" — this includes the `question` tool. The operator is not part of the execution loop.
 - Decide the best option yourself on sight with best judgment; document the decision and reasoning in your report.
@@ -63,12 +60,13 @@ REPORT WRITING — ONE WRITE, COMPLETE:
 REPORT FORMAT:
 ## [Subject]
 ### Intent
-[Your understanding of the task and your intended approach, in your own words — assumptions, trade-offs, alternatives rejected. State it in your FIRST assistant message, before your first code change; copy it here at report time. Write "N/A" for non-implementation runs.]
+[Your understanding of the task and your intended approach, in your own words — assumptions, trade-offs, alternatives rejected — for a fix run, including the assumptions the fix design relies on, and whether the code confirms each (`assumption ok: <file:line>` / `assumption FAILED: <what the code actually does>`). State it in your FIRST assistant message, before your first code change; copy it here at report time. Write "N/A" for non-implementation runs.]
 ### Summary
 [2-3 sentences: scope covered, changes made, test results]
 ### Changes
-| # | File:Line | Description |
-|---|-----------|-------------|
+| # | File:Line | Was → Now | Description |
+|---|-----------|-----------|-------------|
+Was → Now = the value, signature or predicate as it was and as it is after the fix — the record a later review keys on when it checks whether two fixes changed the same value. Write "added" / "removed" when there is no previous or no new form.
 ### Change Class
 [One line per applicable change-class obligation — condition change (BLOCK + LIVENESS directions), removal or neutering of documented-defensive code (why the past failure cannot recur), feature-runs-when change (the observable signal + the check that reads it), state-mutating operation (the two-run outcome + its guard, or why a second run cannot occur). Write "NONE" when none applies. An applicable obligation left unanswered leaves the change unverified.]
 ### Test Results

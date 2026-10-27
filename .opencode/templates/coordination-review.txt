@@ -12,9 +12,6 @@ MEMORY USE (READ-ONLY):
 - Missing tool or failed search: continue immediately, no retries.
 - Report one line: Memory search: "<query>" -> N relevant (<short summary>) — or "memory not available".
 
-COORDINATION:
-- After EACH subtask, append new results to report (Read existing content first, then Write full updated report)
-
 AUTONOMY (MANDATORY):
 - NEVER ask the operator questions, request approval or confirmation, or ask "should I continue?" — this includes the `question` tool. The operator is not part of the execution loop.
 - Decide the best option yourself on sight with best judgment; document the decision and reasoning in your report.
@@ -68,21 +65,23 @@ REPORT FORMAT:
 [2-3 sentences: scope covered, issue counts by severity]
 ### Findings
 [ONLY actual issues — do NOT list "no issue found" confirmations here]
-| # | Severity | File:Line | Scope | Reachability/Trigger | Description |
-|---|----------|-----------|-------|----------------------|-------------|
+| # | Severity | File:Line | Scope | Reachability/Trigger | Guard-search | Description |
+|---|----------|-----------|-------|----------------------|--------------|-------------|
 Scope = in-scope / out-of-scope against the brief's out-of-scope line.
 Reachability/Trigger = one line: the production path that reaches the defect, or `LATENT` when no reachable trigger exists (severity ≤ LOW).
+Guard-search = one line per guard the finding depends on: what was searched for, in which files, and the result (`guard-search: <pattern> in <file> → <n> hits`). Any file outside the finding's own `File:Line` set is prefixed `outside-cited:`. Write `guard-search: NONE` only when the finding claims no defect a guard could prevent.
 Instances = every occurrence of the finding's mechanism class within the reviewed scope, file:line (out-of-scope occurrences named and marked not fixed). One finding covers all instances of the same root cause.
 [Every finding: include its verification evidence (what you checked and found); for HIGH/CRITICAL also the confidence level (CONFIRMED / LIKELY / POSSIBLE)]
 ### Investigated-and-Rejected
 [Items you checked and dismissed — reasoning + file:line. HIGH/CRITICAL-claim dismissals are re-examined adversarially; all dismissals are recorded.]
 ### Fix Design (investigative/T3 reviews)
 [Per FIXABLE finding: exact root cause + a MINIMAL surgical fix design (5-15 lines); verdict FIXABLE / EXCLUDE with justification.
-Owning layer: `this module | caller/consumer | dependency | runtime/platform | external contract`. When the fix is a boundary guard rather than a correction in the owning layer, state why the owning layer cannot be corrected here and that the guard is deliberate containment. The field never changes the verdict (an external owner does not by itself make a finding EXCLUDE) and never licenses expanding scope to fix the owner.]
+Owning layer: `this module | caller/consumer | dependency | runtime/platform | external contract`. When the fix is a boundary guard rather than a correction in the owning layer, state why the owning layer cannot be corrected here and that the guard is deliberate containment. The field never changes the verdict (an external owner does not by itself make a finding EXCLUDE) and never licenses expanding scope to fix the owner.
+Assumptions = the claims the fix makes about existing code — what a function does, what its callers pass, whether a value is restated elsewhere, whether an invariant holds — each with `file:line`. Write `assumptions: NONE` when the fix relies on no claim about existing code.]
 ### MUST ANSWER Responses
 [Each answered with file:line evidence. Positive confirmations go HERE, not in Findings]
 ### Verified
 [One line per check that ran, with the exact command and its outcome, plus the files read. A claim is verified only if you checked it in this task; a narrower substitute check is reported as what it is, with the exact command.]
-[ZERO-FINDING RECEIPT (MANDATORY): a review or post-fix report that files no findings MUST end this section with `No findings — examined <files/functions>, ran <commands>`. A genuinely empty scope MUST read `No findings — scope empty` and name what established that. A post-fix APPROVED is a zero-finding verdict and carries the same line. A bare "no findings" or a bare APPROVED without this line is an incomplete report.]
+[ZERO-FINDING RECEIPT (MANDATORY): a review or post-fix report that files no findings MUST end this section with `No findings — examined <files/functions>, ran <commands>`. A genuinely empty scope MUST read `No findings — scope empty` and name what established that. A post-fix APPROVED that files no finding at all is a zero-finding verdict and carries the same line; an APPROVED that records a LOW-only observation is not a zero-finding report and does not. A bare "no findings" or a bare APPROVED without this line is an incomplete report.]
 ### Not Covered
 [What could NOT be checked, and why (no test/tool exists, environment blocked). A check that exists and was skipped is unverified work — not a Not Covered item.]
