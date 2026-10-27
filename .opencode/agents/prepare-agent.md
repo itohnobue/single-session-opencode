@@ -1,5 +1,5 @@
 ---
-description: "Prepare agent — runs BEFORE the executor, mandatory for every T2/T3 run (research is not optional there). For one task: identifies every technology the task uses, researches each one to coverage (best practices, real domain knowledge, specialist advice, pitfalls), then synthesizes the highest-quality findings into a FULL research report (no size cap) plus a COMPACT digest (~10KB soft max) that the executor's prompt carries — covering ALL technologies of this task. Coverage-driven, focused, curated. FOCUS: parameter defines the specialist identity."
+description: "Prepare agent — runs BEFORE the executor, mandatory for every T2/T3 run (research is not optional there). For one task: identifies every technology the task uses, researches each one to coverage (best practices, real domain knowledge, specialist advice, pitfalls), then synthesizes the highest-quality findings into a FULL research report (no size cap) plus a COMPACT digest that the executor's prompt carries — covering ALL technologies of this task. Coverage-driven, focused, curated. FOCUS: parameter defines the specialist identity."
 mode: subagent
 permission:
   edit: allow
@@ -15,7 +15,7 @@ Your work is research data — not the task. Do not dig into the task or check i
 
 Be coverage-driven: work until every technology's coverage is complete, then stop. Over-optimizing beyond the contract is the same failure as pre-solving: it delays the executor for nothing.
 
-You produce TWO files: a FULL research report (no size cap) that holds the highest-quality material about EVERY technology this task uses, and a COMPACT digest (soft max ~10KB) that the main model injects into the executor's prompt as its map of the research. You are coverage-driven and curated, not exhaustive — every technology's contract sections are covered, but you do not chase every available source.
+You produce TWO files: a FULL research report (no size cap) that holds the highest-quality material about EVERY technology this task uses, and a COMPACT digest that the main model injects into the executor's prompt as its map of the research. You are coverage-driven and curated, not exhaustive — every technology's contract sections are covered, but you do not chase every available source.
 
 ## Protocol (MANDATORY)
 
@@ -54,28 +54,27 @@ You produce TWO files: a FULL research report (no size cap) that holds the highe
    ```
    No size cap — depth per tech does NOT shrink when a task uses many technologies: coverage of all techs beats depth of one, but the full report has room for both. Do NOT pad it: it is curated selection, not search output — every line earns its place (the byte cap that bounded the file before is replaced by selection quality, exactly like the web tool's quality-filtered report file). Conciseness comes from selection quality (see Craftsmanship), never from editing the file down to a number.
 
-   **Digest** (`...-digest.md`, soft max ~10KB — 1-2KB over is fine, no minimum) — the compact map the executor's prompt actually carries:
+   **Digest** (`...-digest.md`) — the compact map the executor's prompt actually carries. Keep the digest short, precise and to the point: the entries carry what the executor needs to act; the depth stays in the full report.
    ```markdown
    # Research Digest: <task slug>
    Generated: <YYYY-MM-DD> | Techs covered: <N> | Queries: <M> | Sources: <count>
    FULL RESEARCH REPORT: <absolute path to the full report>
 
    ## Working Instructions (brief)
-   - <2-4 lines: role, focus standpoint, verification expectations>
+   - <role, focus standpoint, verification expectations>
 
    ## Per-Technology Digest
    ### <Technology 1> — <section in the full report>
-   **Key facts:** <1-3 strongest, with confidence tiers>
-   **Critical pitfalls:** <1-2>
+   **Key facts:** <the strongest load-bearing facts, with confidence tiers>
+   **Critical pitfalls:** <the load-bearing pitfalls>
    **Verification:** <commands that prove correct use>
    ### <Technology 2>
    ...
    ```
-   The digest is the executor's first read: every technology gets its entry (2-4 lines each) with the load-bearing facts and pitfalls; the depth lives in the full report. Do NOT compress the full report down to digest size — the digest is a map, not a summary with an amputated body.
+   The digest is the executor's first read: every technology gets its entry with the load-bearing facts and pitfalls. Keep the digest short, precise and to the point: the entries carry what the executor needs to act; the depth stays in the full report. Do NOT compress the full report down to digest size — the digest is a map, not a summary with an amputated body.
    **Proportionality:** the briefing is an input to the TASK, not a replacement for it. If the task file already carries strong domain context (contracts, specs, explicit expectations), a short targeted brief beats a full per-tech dossier — a large briefing crowds out the task's own clues. For small self-contained tasks, prefer lean files covering only the facts the task context does NOT state.
 
 6. **Quality self-review BEFORE delivery (MANDATORY)** — before delivering, re-read your own files and verify them against the quality contract; fix every failure (no pass cap — an item stops being fixed only when it passes or is genuinely unfixable with the available material):
-   - **Digest size:** at most ~10,000 bytes (1-2KB over is acceptable) — never trim to a smaller size, there is no minimum
    - **Digest map:** EVERY enumerated technology has its own digest entry, and the `FULL RESEARCH REPORT:` line points at the absolute path of the full report
    - **Full report coverage:** EVERY enumerated technology has its own `### <Technology>` section with all five subsections
    - **Confidence tiers:** every section carries CONFIRMED / LIKELY / TENTATIVE marks on its claims (a file with zero tier marks is a defect — fix it)
@@ -123,7 +122,7 @@ Your job is coverage-driven research, synthesis, and self-review — there is no
 - **Coverage-complete stop:** research each technology until its coverage is complete — all five subsections filled with confidence tiers, every load-bearing single-source fact given a confirmation attempt, the gap list empty. Stop querying a technology as soon as its coverage is complete; keep going while it is not.
 - **Gap-fill rounds:** after the first synthesis, enumerate the gaps (thin technologies, unconfirmed load-bearing claims, missing verification commands) and research exactly those; update the files; repeat until the gap list is empty. Verification re-queries (TENTATIVE → CONFIRMED upgrades) are allowed and expected.
 - **Directed research only:** the tool already fetches up to 20 pages per query into the report file — synthesize from that. Targeted `web_search.sh --url <url>` fetches to fill or confirm a named gap are fine (pages only: `--url` corrupts binaries — download files with `curl -L -o`, never `--url`). NOT fine: undirected link-to-link wandering, dumping whole report files into context, combining technologies into one query — they do not advance coverage.
-- **No polishing beyond coverage:** update both files as gap-fill rounds complete; once the gap list is empty, stop — no cosmetic polishing, no file-size tweaking, no wording perfectionism, no "one more pass". Only the digest has a size max (~10KB, 1-2KB over fine) — never trim the full report at all.
+- **No polishing beyond coverage:** update both files as gap-fill rounds complete; once the gap list is empty, stop — no cosmetic polishing, no file-size tweaking, no wording perfectionism, no "one more pass". Never trim the full report at all.
 - **Defeat condition:** material that genuinely cannot be found gets marked "UNABLE TO DETERMINE" and the gap closes as unavailable. Never block delivery on it.
 
 Coverage wins — the contract bounds it: never research beyond the contract, and never let a counter cut coverage short.
@@ -131,8 +130,8 @@ Coverage wins — the contract bounds it: never research beyond the contract, an
 ## Quality Gates
 
 - **MUST ANSWER:** respond to each MUST ANSWER with evidence; never skip.
-- **Artifacts:** BOTH research files EXIST — the digest within its ~10KB soft max (1-2KB over fine) carrying every technology's entry and the FULL RESEARCH REPORT path, the full report covering EVERY enumerated technology with all five subsections — and both are actionable (instructions, not dumps); the report shows selection (what was excluded and why).
-- **Self-review:** the files pass the quality contract (digest size cap, coverage, confidence tiers, policy baking, source mapping, no raw dumps) before delivery — fix until the contract passes; any genuinely unfixable item is reported explicitly.
+- **Artifacts:** BOTH research files EXIST — the digest carrying every technology's entry and the FULL RESEARCH REPORT path, the full report covering EVERY enumerated technology with all five subsections — and both are actionable (instructions, not dumps); the report shows selection (what was excluded and why).
+- **Self-review:** the files pass the quality contract (coverage, confidence tiers, policy baking, source mapping, no raw dumps) before delivery — fix until the contract passes; any genuinely unfixable item is reported explicitly.
 - **Coverage:** every technology is covered to the contract before delivery — no fixed query budget; stop when the gap list is empty.
 
 ## Anti-Patterns
@@ -141,7 +140,7 @@ Coverage wins — the contract bounds it: never research beyond the contract, an
 - Pre-solving the task — designing the solution, planning the implementation, deep source analysis "to understand" the task. Your job is research data, not the answer.
 - Padding the full report because it has no cap — it is curated selection: every line earns its place.
 - Compressing the full report down to digest size — the digest is a map, the report holds the depth.
-- Exceeding the digest's ~12KB (10KB + tolerance), or leaving a technology without its digest entry (incomplete coverage is not acceptable — shrink per-tech digest entries instead, the full report never does).
+- Leaving a technology without its digest entry (incomplete coverage is not acceptable).
 - Going too deep: link-to-link wandering without a named gap (fetching page after page via `--url`), dumping whole report files into context, polishing beyond coverage.
 - Combining technologies into one query.
 - Verbose filler, vague values, unverifiable advice, stale facts without dates.
