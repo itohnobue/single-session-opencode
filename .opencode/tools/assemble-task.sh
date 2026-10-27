@@ -232,16 +232,19 @@ mkdir -p "$OUT_DIR"
   # "See review-auth-report.md for context" are preserved).
   # Resolve relative tmp/ references to absolute. Idempotent: protect the expanded absolute
   # path and the literal `$REPO_ROOT/tmp/` / `${REPO_ROOT}/tmp/` forms so none is re-prefixed.
-  # The word-boundary equivalent (^|[^[:alnum:]_]) is pure POSIX ERE — it
+  # The word-boundary equivalent (^|[^[:alnum:]_/]) is pure POSIX ERE — it
   # replaces GNU-only [[:<:]] (unsupported by MSYS/BSD sed). The , delimiter
   # keeps the alternation | unescaped, so it is valid on GNU, BSD, and MSYS.
+  # The class excludes `/` as well: an absolute or already-relative path that
+  # happens to contain a `tmp/` segment (e.g. a project under /srv/tmp/proj, or
+  # ./tmp/x) must never be prefixed again — only a bare relative `tmp/` is.
   sed "s|{{NAME}}|@NAME_LITERAL@|g" "$TASK_FILE" \
     | sed "s|{NAME}|${NAME}|g" \
     | sed -E '/^[[:space:]]*(-[[:space:]]*)?(tmp\/)?[a-zA-Z0-9_.-]+-report\.md[[:space:]]*$/d' \
     | sed "s|${REPO_ROOT_SED}/tmp/|@REPO_TMP_PLACEHOLDER@|g" \
     | sed 's|\${REPO_ROOT}/tmp/|@REPO_TMP_VAR1@|g' \
     | sed 's|\$REPO_ROOT/tmp/|@REPO_TMP_VAR2@|g' \
-    | sed -E "s,(^|[^[:alnum:]_])tmp/,\1${REPO_ROOT_SED}/tmp/,g" \
+    | sed -E "s,(^|[^[:alnum:]_/])tmp/,\1${REPO_ROOT_SED}/tmp/,g" \
     | sed "s|@REPO_TMP_PLACEHOLDER@|${REPO_ROOT_SED}/tmp/|g" \
     | sed 's|@REPO_TMP_VAR1@|${REPO_ROOT}/tmp/|g' \
     | sed 's|@REPO_TMP_VAR2@|$REPO_ROOT/tmp/|g'
