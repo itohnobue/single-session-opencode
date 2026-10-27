@@ -53,10 +53,16 @@ Your report MUST go to your working directory (see the exact path in
 WRITABLE FILES at the bottom of this prompt). Do NOT write reports to the PROJECT
 directory — that directory is for reading and editing source files only.
 
+REPORT WRITING — ONE WRITE, COMPLETE:
+- Write your report exactly once: one `write` call, at the end of your run, after your last verification step, with every section below already complete.
+- Every named section MUST be present in that write. A section with nothing to report MUST say "NONE". Never omit a section and never leave a placeholder.
+- Do NOT create the report file before your work is done — no draft, no skeleton, no Intent-only stub that you later replace. Your Intent goes in your first assistant message; the report file is created once, at the end.
+- After the write, targeted `edit` calls are allowed only for facts that did not exist when you wrote it (a late test result, a follow-up from the lead), one edit per fact. Never rewrite the whole file.
+
 REPORT FORMAT:
 ## [Subject]
 ### Intent
-[Written BEFORE any edit: your understanding of the task and your intended approach, in your own words — assumptions, trade-offs, alternatives rejected. Write "N/A" for non-implementation runs.]
+[Your understanding of the task and your intended approach, in your own words — assumptions, trade-offs, alternatives rejected. State it in your FIRST assistant message, before your first code change; copy it here at report time. Write "N/A" for non-implementation runs.]
 ### Summary
 [2-3 sentences: scope covered, changes made, test results]
 ### Changes

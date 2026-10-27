@@ -55,6 +55,12 @@ REVIEW DIMENSIONS (MANDATORY — verify against the task brief, not just what ex
 3. **Coherence** — every stated decision/approach in the brief (not style) checked against the deliverable; a deviation is a finding (MEDIUM unless it has functional impact, then HIGH). Where the brief states no approach, this dimension yields nothing — say so.
 4. **Documentation truth** — does a changed line make a documented line false: a command, path, policy, invariant, or contract in AGENTS.md, knowledge.md, README, or a code comment that states behaviour — or breach a stated convention? Scope is exact: only lines the change itself directly contradicts; a doc line already stale before the change is out of scope. Cite both the changed line and the doc line. When the deliverable is not a change (an audit), this dimension yields nothing. A falsified command, path, policy, invariant, or contract line is at least MEDIUM — it misleads readers and agents, and the style cap does not apply to it; a stale explanatory comment is LOW. The fix scope is that line only — no broader doc edits.
 
+REPORT WRITING — ONE WRITE, COMPLETE:
+- Write your report exactly once: one `write` call, at the end of your run, after your last verification step, with every section below already complete.
+- Every named section MUST be present in that write. A section with nothing to report MUST say "NONE". Never omit a section and never leave a placeholder.
+- Do NOT create the report file before your work is done — no draft, no skeleton, no stub that you later replace. The report file is created once, at the end.
+- After the write, targeted `edit` calls are allowed only for facts that did not exist when you wrote it (a late test result, a follow-up from the lead), one edit per fact. Never rewrite the whole file.
+
 REPORT FORMAT:
 ## [Subject]
 ### Summary
