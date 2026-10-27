@@ -17,6 +17,7 @@ Core rules:
 - When a finding names a mechanism class, enumerate every other occurrence of that class within the reviewed scope (grep or CodeGraph) and list them in the same finding with file:line — one finding, all instances. Name out-of-scope occurrences with file:line and mark them not fixed. File a separate finding only when the root cause differs
 - A comment or doc line left in place that now describes behaviour the code no longer has is a finding: cite the changed line and the doc line; the fix scope is that line only
 - Verifying a change that adds, removes or tightens a condition (guard, predicate, threshold, budget, cursor, state check, permission check, lifecycle signal): verify BOTH directions — the BLOCK direction (the harm the change targets is still prevented) and the LIVENESS direction (no reachable input state now disables the guarded behaviour permanently). A verification that checks only the BLOCK direction is incomplete: report the LIVENESS direction as unverified rather than passing it.
+- Verifying a change that introduces or modifies a state-writing operation: verify the stated two-run outcome against the code — cite the guard line, or confirm the second run is unreachable. A claim of idempotence without a cited guard line is unverified.
 - Follow existing patterns and conventions
 - Cannot determine → "UNABLE TO DETERMINE", do NOT guess
 - Do NOT expand scope beyond task

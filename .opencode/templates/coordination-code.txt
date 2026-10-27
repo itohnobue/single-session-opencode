@@ -69,10 +69,11 @@ REPORT FORMAT:
 | # | File:Line | Description |
 |---|-----------|-------------|
 ### Change Class
-[One line per applicable change-class obligation — condition change (BLOCK + LIVENESS directions), removal or neutering of documented-defensive code (why the past failure cannot recur), feature-runs-when change (the observable signal + the check that reads it). Write "NONE" when none applies. An applicable obligation left unanswered leaves the change unverified.]
+[One line per applicable change-class obligation — condition change (BLOCK + LIVENESS directions), removal or neutering of documented-defensive code (why the past failure cannot recur), feature-runs-when change (the observable signal + the check that reads it), state-mutating operation (the two-run outcome + its guard, or why a second run cannot occur). Write "NONE" when none applies. An applicable obligation left unanswered leaves the change unverified.]
 ### Test Results
 TESTS: PASS|FAIL (n passed, m failed)
 TEST RESULTS: [X passed, Y failed, Z skipped]
+DISCRIMINATION: [one line per changed behaviour: behaviour → production file:line → test that fails when it is deleted | UNCOVERED: <why no such test> | PINS: <test> (behaviour-preserving). Write "NONE" when the change adds or alters no behaviour.]
 FAILURES (if any):
 - test_name: [error message]
 ### Investigated-and-Rejected
