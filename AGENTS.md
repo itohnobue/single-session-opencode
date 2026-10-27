@@ -108,19 +108,19 @@ Plain (no research) is used ONLY when the task file already carries rich context
 
 ### Task splitting (volume caps — applied by the main model)
 
-Big delegated tasks split into multiple agent runs BEFORE the tier is chosen, per mechanical limits. The rules are counting, not judgment:
+Big delegated tasks split into multiple agent runs BEFORE the tier is chosen, per mechanical limits. The split limits are counting, not judgment; the packing preference below is recorded, never enforced.
 
 **General volume cap (any applicable case):** 5K LOC / 25 files is a general recommendation — code editing, code review, verification, adversarial batches, implementations. It does not apply where code volume is irrelevant: research-type agents (prepare-agent, web-searcher, research-analyst, data-researcher) are exempt, their work is web content, not code volume. The tighter split rules below apply to read-heavy work on top of this general cap.
 
 **Discovery/review/audit splits (read volume — agents must read every file):**
-- LOC ≤ 4000 AND files ≤ 12 → **DO NOT SPLIT.**
-- LOC > 5500 OR files > 18 → **MUST SPLIT** (no exceptions — "cohesive code" does not override the caps).
-- 4001 ≤ LOC ≤ 5500 OR 13 ≤ files ≤ 18 → **SPLIT UNLESS:** (a) all files form a single cohesive module, AND (b) no individual file exceeds 300 LOC. If both hold → DO NOT SPLIT (one-line justification). Otherwise → SPLIT.
+- LOC ≤ 5,000 AND files ≤ 15 → **DO NOT SPLIT.**
+- LOC > 5,000 OR files > 20 → **MUST SPLIT** (no exceptions — "cohesive code" does not override the caps). One escape: a single-file scope over 5,000 LOC with no semantic boundary stays whole — record the overage.
+- 16 ≤ files ≤ 20 (LOC ≤ 5,000) → **SPLIT UNLESS:** (a) all files form a single cohesive module, AND (b) no individual file exceeds 300 LOC. If both hold → DO NOT SPLIT (one-line justification). Otherwise → SPLIT.
 - Re-count after each split. Each resulting sub-agent MUST stay within the limits.
 
-**Post-split merge-back (avoid fragmentation):** if any sub-agent has fewer than 6 files AND fewer than 2000 LOC, merge sub-agents back into the parent and accept the parent as within the narrow cap. A 6f/2,000-LOC agent is better than two 3f/1,000-LOC agents with almost nothing to audit.
+**Packing (avoid fragmentation):** pack each read-heavy agent into the 3,000–5,000 LOC band, and prefer merging two scopes that share a module, an import cluster, or a module-and-its-tests relationship when the merged scope stays within the cap, neither side crosses an ALWAYS boundary, and the combined MUST ANSWER set still fits one agent's 3–5 specific questions. Never merge to satisfy arithmetic. A primary scope below 3,000 LOC is not a violation — state it in the batch plan with its category (`module-complete`, `distinct lens`, `boundary slice`, `cap/file blocked`, `other`). A split you perform yourself must not leave a fragment: if a half is under 3,000 LOC and the parent fits back inside the cap, merge it back.
 
-**Thin-stub clause:** when file count exceeds 18 but total LOC is under 2000, the files are likely thin stubs — accept as a single agent, never split on file count alone (precedence over the file-count cap).
+**Thin-stub clause:** when file count exceeds 20 but total LOC is under 3,000, the files are likely thin stubs — accept as a single agent, never split on file count alone (precedence over the file-count cap).
 
 **Split strategy (in order):** (1) module/concern boundaries; (2) in-file boundaries for single large files — find a natural semantic boundary near the midpoint (function/class/section start, test class boundary; never mid-function; within ±20% of midpoint, else fall back to approximate midpoint and document why); (3) directory boundaries. **Scope overlap at integration boundaries:** do NOT cut cleanly between architectural layers — each sub-agent reads its core scope PLUS the integration-layer files bridging to adjacent scopes (the overlap files count toward both sub-agents' volume caps). Format transformation between scopes (writer↔parser, encoder↔decoder) always gets both sides.
 
