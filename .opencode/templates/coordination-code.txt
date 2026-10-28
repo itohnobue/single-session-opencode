@@ -67,6 +67,8 @@ REPORT FORMAT:
 | # | File:Line | Was → Now | Description |
 |---|-----------|-----------|-------------|
 Was → Now = the value, signature or predicate as it was and as it is after the fix — the record a later review keys on when it checks whether two fixes changed the same value. Write "added" / "removed" when there is no previous or no new form.
+### Instances
+[One line per checklist item from the task file's instance checklist — `INSTANCE <n>: <file:line> — FIXED: <witness>` / `INSTANCE <n>: <file:line> — NOT FIXED: <reason>` / `INSTANCE <n>: <file:line> — OUT OF SCOPE: <reason>`. Write "NONE" when the finding carries no `Instances:` statement.]
 ### Change Class
 [One line per applicable change-class obligation — condition change (BLOCK + LIVENESS directions), removal or neutering of documented-defensive code (why the past failure cannot recur), feature-runs-when change (the observable signal + the check that reads it), state-mutating operation (the two-run outcome + its guard, or why a second run cannot occur). Write "NONE" when none applies. An applicable obligation left unanswered leaves the change unverified.]
 ### Test Results
