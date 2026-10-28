@@ -5,7 +5,7 @@
 """Verify the shared workflow payload reached its destination byte-for-byte.
 
 Scope: single-session-opencode (source) to a shared-payload destination
-(orchestrator-opencode by default). Checks the 15 shared files and the three
+(orchestrator-opencode by default). Checks the 18 shared files and the three
 anchors that prove the generated single-session skill was actually transformed.
 Exit 0 pass, 1 drift, 2 destination missing (never a silent pass).
 """
@@ -18,6 +18,9 @@ from pathlib import Path
 SHARED_FILES = (
     "tools/assemble-task.sh",
     "tools/inject-research.sh",
+    "tools/plan_scopes.py",
+    "tools/plan-scopes.sh",
+    "tools/plan-scopes.bat",
     "tools/memory.py",
     "tools/memory.sh",
     "tools/memory.bat",
