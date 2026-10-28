@@ -39,7 +39,7 @@ export WEB_RESEARCH_DEEPSEEK=1
 
 The API key is read from `provider.deepseek.options.apiKey` in `~/.config/opencode/opencode.json` (the config OpenCode already uses); `DEEPSEEK_API_KEY` overrides it.
 
-## The 8 agents
+## The 7 agents
 
 `.opencode/agents/` — INDEX.md is the quick reference.
 
@@ -51,8 +51,7 @@ The API key is read from `provider.deepseek.options.apiKey` in `~/.config/openco
 | `verification-analyst` | Extraction + synthesis only for findings-heavy flows — dedup, tagging, synthesis grid (knowledge harvesting is the main model's job, in-session). |
 | `adversarial-reviewer` | Falsification gate — the single distinct quality gate; batch sizes CRITICAL (1:1), HIGH (1:3), MEDIUM (1:10) are volume controls. |
 | `web-searcher` | Internet research (standards, formats, versions, ecosystems, advisories) — for substantial research; quick lookups happen in-session with `web_search.sh` (the default). |
-| `research-analyst` | Structured multi-source research — tech comparisons, literature reviews, market research. |
-| `data-researcher` | Dataset research — discovery, collection, quality assessment. |
+| `research-analyst` | Structured multi-source research — tech comparisons, literature reviews, market research — and dataset research (discovery, collection, quality assessment, pattern mining). |
 
 ## Requirements
 

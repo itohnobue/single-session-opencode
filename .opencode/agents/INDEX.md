@@ -1,4 +1,4 @@
-# Agent Directory (8 agents)
+# Agent Directory (7 agents)
 
 Quick selection reference. All workflow instructions live in `AGENTS.md` — the Delegation Rules section (executor tiers T1/T2/T3, task splitting by volume, second-opinion rules, optional VERIFY block) and Delegation Operations (how to spawn, reviewing output, the T3 workflow). Read it before delegating.
 
@@ -10,5 +10,4 @@ Quick selection reference. All workflow instructions live in `AGENTS.md` — the
 | verification-analyst.md | Verification analyst | Extraction + synthesis for findings-heavy flows (merged s2 outputs, multi-report audits, VERIFY blocks): dedups/tags findings (both-found/single-found, PRIOR_FIX_ATTEMPT), routes HIGH/CRITICAL-claim investigated-and-rejected items into adversarial batches, compiles the synthesis grid (severity challenges, mechanism categories, FIX determination). Knowledge harvesting is NOT its job — the main model performs all harvesting in-session (AGENTS.md Memory System + T3 final stage). |
 | adversarial-reviewer.md | Adversarial reviewer | Falsification gate — optional VERIFY block. The single distinct quality gate; batch sizes CRITICAL (1:1), HIGH (1:3), MEDIUM (1:10) are volume controls. Falsifies findings (FP → REJECTED, overstated → WEAKENED), challenges rejected-non-bug lists, prioritizes unique findings on merged s2 outputs; CONFIRMED findings drive fix + re-verify (convergence rule — loop continues while CONFIRMED HIGH+ remain). |
 | web-searcher.md | Web researcher | Internet research (standards, formats, versions, ecosystems, advisories) — for substantial internet research; quick/simple lookups happen in-session with `web_search.sh` (the default). |
-| research-analyst.md | Research analyst | Structured multi-source research — analysis/synthesis of gathered material (tech comparisons, literature reviews, market research). Source evaluation, confidence tiers, counter-evidence discipline. |
-| data-researcher.md | Data researcher | Dataset research — data discovery, collection, quality assessment, pattern mining. Data-quality and source-quality gates, graduated confidence. |
+| research-analyst.md | Research analyst | Structured multi-source research — analysis/synthesis of gathered material (tech comparisons, literature reviews, market research) — and dataset research (discovery, collection, quality assessment, pattern mining). Source evaluation, confidence tiers, counter-evidence discipline. |
