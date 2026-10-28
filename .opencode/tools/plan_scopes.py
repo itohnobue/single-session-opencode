@@ -4,22 +4,28 @@
 # dependencies = ["wcmatch>=8.0", "pathspec>=0.11", "tomli; python_version < '3.11'"]
 # ///
 """
-plan_scopes.py - deterministic volume-scope resolver for the orchestrator workflow.
+plan_scopes.py - deterministic volume-scope resolver for the orchestrator and
+single-session workflows.
 
-Replaces the mechanical part of the `volume-splitter` agent: resolves a plan's
-`toml plan-scopes` block to exact files with exact `wc -l` LOC counts, applies
-the volume caps, applies the planner's cut, merges back pointless splits,
-computes the stage packing line and the size class, and writes one generated
-section into the plan between two marker lines.
+It replaces the mechanical scope arithmetic of the planning stage (formerly the
+volume-splitter agent in the orchestrator): resolves a scope spec to exact files
+with exact `wc -l` LOC counts, applies the volume caps, applies the author's cut,
+merges back pointless splits, computes the stage packing line and the size class,
+and — in plan mode — writes one generated section into the plan between two
+marker lines.
 
 Determinism: every list is sorted, every path is repo-relative POSIX, the
 section uses LF newlines, and no timestamp or absolute path is ever emitted.
 Two consecutive `resolve` runs produce byte-identical files.
 
 Usage:
-    plan_scopes.py resolve --plan <path-to-glm-plan.md> [--root DIR] [--json] [--dry-run]
-    plan_scopes.py check   --plan <path-to-glm-plan.md> [--root DIR] [--json]
-    plan_scopes.py propose --plan <path-to-glm-plan.md> [--root DIR] [--json]
+    plan_scopes.py resolve --plan <glm-plan.md> | --spec <scopes.toml> [--root DIR] [--json] [--dry-run]
+    plan_scopes.py check   --plan <glm-plan.md> | --spec <scopes.toml> [--root DIR] [--json]
+    plan_scopes.py propose --plan <glm-plan.md> | --spec <scopes.toml> [--root DIR] [--json]
+
+    --plan   the plan carries the spec in a fenced `toml plan-scopes` block and
+             receives the generated section (resolve writes; check re-derives).
+    --spec   a standalone TOML spec; resolve/check/propose write nothing.
 
 Exit codes:
     resolve   0 ok, 2 input error
@@ -2073,7 +2079,7 @@ EPILOG = (
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="plan_scopes.py",
-        description="Deterministic volume-scope resolver for the orchestrator workflow.",
+        description="Deterministic volume-scope resolver for the orchestrator and single-session workflows.",
         epilog=EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
