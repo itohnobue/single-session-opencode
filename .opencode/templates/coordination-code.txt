@@ -53,14 +53,14 @@ directory — that directory is for reading and editing source files only.
 REPORT WRITING — ONE WRITE, COMPLETE:
 - Write your report exactly once: one `write` call, at the end of your run, after your last verification step, with every section below already complete.
 - Every named section MUST be present in that write. A section with nothing to report MUST say "NONE". Never omit a section and never leave a placeholder.
-- Do NOT create the report file before your work is done — no draft, no skeleton, no Intent-only stub that you later replace. Your Intent goes in your first assistant message; the report file is created once, at the end.
+- Do NOT create the report file before your work is done — no draft, no skeleton, no Intent-only stub that you later replace. Your Intent is written in the report's `### Intent` section in that same single write; the report file is created once, at the end.
 - After the write, targeted `edit` calls are allowed only for facts that did not exist when you wrote it (a late test result, a follow-up from the lead), one edit per fact. Never rewrite the whole file.
 - Keep the report short, precise and to the point — but never at the expense of a required section or its evidence.
 
 REPORT FORMAT:
 ## [Subject]
 ### Intent
-[Your understanding of the task and your intended approach, in your own words — assumptions, trade-offs, alternatives rejected — for a fix run, including the assumptions the fix design relies on, and whether the code confirms each (`assumption ok: <file:line>` / `assumption FAILED: <what the code actually does>`). State it in your FIRST assistant message, before your first code change; copy it here at report time. Write "N/A" for non-implementation runs.]
+[Your understanding of the task and the approach actually taken, in your own words — assumptions, trade-offs, alternatives rejected, any deviation from the initial plan and why — for a fix run, including the assumptions the fix design relies on, and whether the code confirms each (`assumption ok: <file:line>` / `assumption FAILED: <what the code actually does>`). Write "N/A" for non-implementation runs.]
 ### Summary
 [2-3 sentences: scope covered, changes made, test results]
 ### Changes

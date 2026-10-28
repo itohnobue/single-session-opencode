@@ -65,8 +65,8 @@ REPORT FORMAT:
 [2-3 sentences: scope covered, issue counts by severity]
 ### Findings
 [ONLY actual issues — do NOT list "no issue found" confirmations here]
-| # | Severity | File:Line | Scope | Reachability/Trigger | Guard-search | Description |
-|---|----------|-----------|-------|----------------------|--------------|-------------|
+| # | Severity | File:Line | Scope | Reachability/Trigger | Guard-search | Instances | Description |
+|---|----------|-----------|-------|----------------------|--------------|-----------|-------------|
 Scope = in-scope / out-of-scope against the brief's out-of-scope line.
 Reachability/Trigger = one line: the production path that reaches the defect, or `LATENT` when no reachable trigger exists (severity ≤ LOW).
 Guard-search = one line per guard the finding depends on: what was searched for, in which files, and the result (`guard-search: <pattern> in <file> → <n> hits`). Any file outside the finding's own `File:Line` set is prefixed `outside-cited:`. Write `guard-search: NONE` only when the finding claims no defect a guard could prevent.
