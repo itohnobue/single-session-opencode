@@ -1,9 +1,11 @@
 SEVERITY GUIDE:
 Severity definitions:
 - CRITICAL: Proven, irreversible harm — destroyed data, exposed secrets, auth bypass, or unrecoverable loss
-- HIGH: Release-blocking — would not ship to its intended users as it stands
+- HIGH: On a reachable production path, the stated basis's users (population + release/version) are exposed to the stated effect, and the release cannot carry it — "would not ship" is the conclusion
 - MEDIUM: User-visible but contained, or recoverable in one step; not release-blocking
 - LOW: Cosmetic, internal, hypothetical, or an unprovable trigger; immediately reversible
+
+Basis (HIGH/CRITICAL): name the population, the release/version, and the reachable effect. A label without a basis is incomplete.
 
 Labels are judged against the brief as written and the intended use — never against an unstated ideal.
 

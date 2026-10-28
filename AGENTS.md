@@ -27,6 +27,8 @@ NEVER create, edit, move, rename, or delete one without an explicit user command
 
 **Harness-change acceptance (MANDATORY).** When a workflow-file change is motivated by an observed failure, record two things with the change — in its commit message, or in the delivery line when the repo is not git: the failure signature, the exact text or behavior that was missing or wrong, and the observable that proves the change landed (a report section, a counted line, a gate verdict, a grep). Check that observable in the next run that exercises the changed path. If the signature recurs, the change did not work — revise or revert it. If the failure has no mechanical signature, mark the change unverified.
 
+**Checkable rules live in artifacts.** A rule that asks the report to contain something is a template field or a tool check, not a sentence; a rule that needs judgment stays prose. Add the slot in the same change.
+
 ---
 
 ## Agents
@@ -679,8 +681,10 @@ Judge every label against the brief as written and the intended use — never ag
 | **None** | No functional impact. |
 | **Low** | Cosmetic, internal, hypothetical, or an unprovable trigger; immediately reversible. |
 | **Medium** | User-visible but contained, or recoverable in one step; not release-blocking. |
-| **High** | Release-blocking: would not ship to its intended users as it stands. |
+| **High** | On a reachable production path, the stated basis's users (population + release/version) are exposed to the stated effect, and the release cannot carry it — "would not ship" is the conclusion. |
 | **Critical** | Proven, irreversible harm — destroyed data, exposed secrets, auth bypass, or unrecoverable loss. |
+
+**Basis (HIGH/CRITICAL):** every HIGH/CRITICAL finding names its population, release/version, and reachable effect; a label without a basis is incomplete.
 
 Findings-side copy: `.opencode/templates/severity-guide.txt` carries the same four levels for reviewers — change both together.
 
