@@ -25,7 +25,7 @@ Mandatory test verification (skip = report auto-rejected by the main model):
 - Do NOT write "all tests pass" without pasting the real output
 - For EACH new or changed behaviour: state the production line whose deletion makes a test fail, one line per behaviour in the report's `DISCRIMINATION:` line (behaviour → file:line → test). If no test fails when that line is deleted, report the behaviour as UNCOVERED instead of verified — a test that cannot fail is not evidence. For a behaviour-preserving change: name the test that pins the behaviour and confirm it was green before and after.
 - If test command is unavailable or fails to run: write "TESTS NOT RUN: [reason]"
-- If some tests fail: list each failure with file:line and error message; mark as `PRE-EXISTING` any failure no changed line explains — report it, do not repair it
+- If some tests fail: list each failure with file:line and error message
 
 FIX WITNESS (when this run implements a reviewed fix):
 - Before editing, reproduce the original failure with the smallest targeted check; after the fix, re-run the same check. Paste both commands and their actual outputs — a described mechanism is not a witness.
