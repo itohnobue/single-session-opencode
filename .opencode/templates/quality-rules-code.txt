@@ -17,6 +17,7 @@ Change-class obligations (state each under the report's `### Change Class` secti
 - Removing or neutering code whose comment, name, or history documents a specific past failure: state why that failure cannot recur under the new design. A comment left in place that now describes behaviour the code no longer has is a defect of this change.
 - Changing when or whether a feature runs: name the feature's observable signal and the check that reads it. "It builds, the tests pass, the app launches" is not evidence for a behaviour change.
 - State-mutating operation (introduces or modifies a write: a file, a database row, a remote request that changes state, a sync or migration step): state the outcome of running it twice — the state after a second run and the guard that makes it a no-op — or why a second run cannot occur (one-shot entry point, process-lifetime lock, idempotent by construction). A guard that would require code outside WRITABLE FILES is reported as a finding, not added.
+- Public-surface change (a changed signature, exported name, persisted format, config key or runtime requirement that something outside the edited files depends on): name each consumer (CodeGraph `impact`/`callers`, grep) and state why it is unaffected, or that it needs a coordinated edit outside WRITABLE FILES — reported as a finding, not made.
 
 Mandatory test verification (skip = report auto-rejected by the main model):
 - After ALL code changes are complete: run the targeted tests covering your change (the ENVIRONMENT section names the test command and how to select the tests covering a change). Never run the full suite — it is out of scope for this stage.
@@ -24,7 +25,7 @@ Mandatory test verification (skip = report auto-rejected by the main model):
 - Do NOT write "all tests pass" without pasting the real output
 - For EACH new or changed behaviour: state the production line whose deletion makes a test fail, one line per behaviour in the report's `DISCRIMINATION:` line (behaviour → file:line → test). If no test fails when that line is deleted, report the behaviour as UNCOVERED instead of verified — a test that cannot fail is not evidence. For a behaviour-preserving change: name the test that pins the behaviour and confirm it was green before and after.
 - If test command is unavailable or fails to run: write "TESTS NOT RUN: [reason]"
-- If some tests fail: list each failure with file:line and error message
+- If some tests fail: list each failure with file:line and error message; mark as `PRE-EXISTING` any failure no changed line explains — report it, do not repair it
 
 FIX WITNESS (when this run implements a reviewed fix):
 - Before editing, reproduce the original failure with the smallest targeted check; after the fix, re-run the same check. Paste both commands and their actual outputs — a described mechanism is not a witness.
