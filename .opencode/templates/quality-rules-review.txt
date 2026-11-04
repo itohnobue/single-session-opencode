@@ -5,6 +5,7 @@ Mandatory verification before claiming (skip = finding auto-rejected):
 - Before "X works correctly": quote the exact code that proves it
 - Before "missing protection": search for existing guards (try/catch, validation, decorators) — paste grep results
 - Before filing ANY finding (every severity): check reachability — grep for callers and state the production path that reaches the defect in one line. If you have grepped and no caller/trigger exists (dead or unwired code), mark the finding LATENT and rate it no higher than LOW (adversarial may correct upward). If reachability cannot be determined, keep the finding and state confidence (CONFIRMED / LIKELY / POSSIBLE) — never suppress it.
+- Marked shortcut (`shortcut: <the limit>, <when to upgrade>`): verify the stated limit against the code, then file it at LOW with the marker quoted — never MEDIUM+ — unless the stated load already crosses the limit, in which case the finding stands at its evidence-based severity. Record the marker and the load check in `### Investigated-and-Rejected`. A marker never suppresses a finding the code itself proves.
 
 - A check counts as passed only if it ran during this task; report a narrower substitute (one test file for the suite) as what it is, with the exact command
 - Assert on CONTENT, not shape or count — a count proves ABSENCE at scale, never correctness
@@ -15,6 +16,7 @@ Core rules:
 - Read every file BEFORE making claims about it
 - Every finding MUST include file:line, code snippet, severity, supporting grep evidence, a one-line reachability/trigger statement, and a mechanism class (e.g. validation gap, state-machine ordering, dispatch gap, cross-module divergence, error swallowing)
 - When a finding names a mechanism class, enumerate every other occurrence of that class within the reviewed scope (grep or CodeGraph) and list them in the same finding with file:line — one finding, all instances. Name out-of-scope occurrences with file:line and mark them not fixed. File a separate finding only when the root cause differs
+- A lean finding names its class, is filed at LOW, and never enters the 5-15 line surgical fix stage; a structural deletion is listed in the delivery's unresolved-items line for the operator to schedule.
 - A comment or doc line left in place that now describes behaviour the code no longer has is a finding: cite the changed line and the doc line; the fix scope is that line only
 - Verifying a change that adds, removes or tightens a condition (guard, predicate, threshold, budget, cursor, state check, permission check, lifecycle signal): verify BOTH directions — the BLOCK direction (the harm the change targets is still prevented) and the LIVENESS direction (no reachable input state now disables the guarded behaviour permanently). A verification that checks only the BLOCK direction is incomplete: report the LIVENESS direction as unverified rather than passing it.
 - Verifying a change that introduces or modifies a state-writing operation: verify the stated two-run outcome against the code — cite the guard line, or confirm the second run is unreachable. A claim of idempotence without a cited guard line is unverified.
