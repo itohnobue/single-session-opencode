@@ -8,6 +8,7 @@ MEMORY USE (READ-ONLY):
 - Before starting, run prior-art searches on the task's main topics and read the hits, letting a relevant entry shape your approach rather than just annotate the report (as many searches as the task needs):
     ./.opencode/tools/memory.sh search "<topic>"  (memory.bat on Windows)
   (read verbs only: search / list; reading knowledge.md at the repo root is fine)
+- On the SECOND failure of the same command (same program and subcommand): before changing it, run one `memory.sh search "<program> <domain noun>"` (e.g. `rsync mount`, `pytest hang`) — never the raw traceback. Nothing relevant → do not repeat it for that command.
 - NEVER add/delete/update knowledge or run session subcommands — writing is the main model's job.
 - Missing tool or failed search: continue immediately, no retries.
 - Report one line: Memory search: "<query>" -> N relevant (<short summary>) — or "memory not available".
@@ -75,6 +76,8 @@ Was → Now = the value, signature or predicate as it was and as it is after the
 TESTS: PASS|FAIL (n passed, m failed)
 TEST RESULTS: [X passed, Y failed, Z skipped]
 DISCRIMINATION: [one line per changed behaviour: behaviour → production file:line → test that fails when it is deleted | UNCOVERED: <why no such test> | PINS: <test> (behaviour-preserving). Write "NONE" when the change adds or alters no behaviour.]
+TESTS TOUCHED: [one entry per test file the diff changes: <path> — pins: <behaviour> — why: required by the fix design | NEW REGRESSION TEST. A test edit the design does not require is a finding. Write "NONE" when no test file changed.]
+CI TOUCHED: [one entry per CI, workflow, lint or type-check config the diff changes, with why | NONE]
 FAILURES (if any):
 - test_name: [error message]
 ### Investigated-and-Rejected

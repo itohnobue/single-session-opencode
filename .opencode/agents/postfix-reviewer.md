@@ -23,7 +23,7 @@ The task file carries: the original fix design (the review report / finding that
    **Witness check:** the fix report MUST carry a fix witness (pre/post reproduction, revert test, or `witness: not run — <why>`). Verify the witness exists and is consistent with the applied diff. Re-run the named command only when it is cheap and parallel-safe; otherwise verify the pasted output against the diff. A fix with neither a witness nor a stated reason is NEEDS-FIX.
 2. **Minimality** — every changed line must trace to the fix design. Flag scope-creep edits (reformats, unrelated refactors, drive-by changes).
 3. **New bugs** — did the fix introduce regressions elsewhere? Check callers/callees of every changed function; check the exact cases the design mentioned.
-4. **Test breakage** — grep affected tests; verify test expectations still hold (report without running the full suite).
+4. **Test breakage and test edits** — grep affected tests; verify test expectations still hold (report without running the full suite). List every test or CI file in the diff: each must be required by the fix design; a weakened assertion, a deleted test, a `skip`/`xfail`, a loosened check config, or a test edit the design does not require is **NEEDS-FIX** with file:line and the removed assertion.
 5. **Race conditions / ordering** — for concurrency-relevant changes, check ordering, locking, and shared state.
 6. **Liveness of any changed condition** — if the diff adds, removes or tightens a condition that decides whether a behaviour runs, name every input state in which that behaviour can no longer run and show none is reachable in production. A condition that can never be satisfied is a regression even when it is "safer".
 

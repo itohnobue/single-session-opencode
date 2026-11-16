@@ -4,7 +4,7 @@
 # dependencies = ["rank-bm25>=0.2.2"]
 # ///
 """
-Model Memory Tool v5.4.0 - Multi-Signal Retrieval Edition
+Model Memory Tool v5.5.0 - Provenance Edition
 
 A simple, focused persistent memory system for OpenCode.
 Session isolation for parallel work. Multi-signal retrieval:
@@ -21,10 +21,13 @@ Features:
 - camelCase-aware BM25 tokenizer (CancellationError -> cancellation, error)
 - Recall echo on search ("Recalled N of M memories")
 - Atomic, round-trip-checked writes; one writer at a time (harvest rule)
+- Provenance: status (observed/proposed) + one evidence line; `observed` requires it
+- Duplicate-resistant add: an identical entry is reconfirmed, not duplicated
+- Staleness listing in `check` (advisory only — nothing is deleted or re-ranked)
 
 Usage:
-    memory.sh add <category> <content> [--tags tag1,tag2]
-    memory.sh update <id> [<content>] [--tags tag1,tag2] [--category cat]
+    memory.sh add <category> <content> [--tags tag1,tag2] [--status observed|proposed] [--evidence "<line>"] [--force]
+    memory.sh update <id> [<content>] [--tags tag1,tag2] [--category cat] [--status observed|proposed] [--evidence "<line>"]
     memory.sh search <query> [--category cat] [--limit n]
     memory.sh context <topic>
     memory.sh list [--category cat]
@@ -71,7 +74,7 @@ if sys.platform == "win32" and hasattr(sys.stdout, "buffer"):
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
-__version__ = "5.4.0"
+__version__ = "5.5.0"
 
 
 class StoreFormatError(RuntimeError):
@@ -113,6 +116,17 @@ STOP_WORDS = frozenset([
 SIMILARITY_THRESHOLD = 0.55
 MIN_SIMILARITY_TOKENS = 8
 
+# Provenance (`add`/`update`): an `observed` entry must name what showed it.
+STATUSES = ["observed", "proposed"]
+EVIDENCE_MAX_CHARS = 240
+
+# Staleness listing in `check`: advisory only — never a rank change, never a
+# deletion, never a caution on every search result. Age is measured from
+# `Reviewed` (falling back to `Changed`).
+STALE_OBSERVED_DAYS = 180
+STALE_PROPOSED_DAYS = 90
+STALE_UNVERIFIED_DAYS = 90
+
 
 # =============================================================================
 # DATA CLASSES
@@ -126,6 +140,14 @@ class Memory:
     content: str
     tags: list[str] = field(default_factory=list)
     changed_at: str = ""
+    # Provenance: `observed` = a command, test run or file read in the writing
+    # session shows the claim (evidence names it); `proposed` = conclusion,
+    # recommendation, or a claim carried from elsewhere; "" = unverified.
+    status: str = ""
+    evidence: str = ""
+    reconfirmed_at: str = ""
+    reconfirmed_count: int = 0
+    reviewed_at: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -134,6 +156,11 @@ class Memory:
             "content": self.content,
             "tags": self.tags,
             "changed_at": self.changed_at,
+            "status": self.status,
+            "evidence": self.evidence,
+            "reconfirmed_at": self.reconfirmed_at,
+            "reconfirmed_count": self.reconfirmed_count,
+            "reviewed_at": self.reviewed_at,
         }
 
 
@@ -247,6 +274,32 @@ def parse_knowledge_text(content: str) -> list[Memory]:
             changed_at = changed_match.group(1).strip()
             body = re.sub(r'^Changed:\s*.+\n?', '', body, flags=re.MULTILINE)
 
+        status = ""
+        status_match = re.search(r'^Status:\s*(.+)$', body, re.MULTILINE)
+        if status_match:
+            status = status_match.group(1).strip().lower()
+            body = re.sub(r'^Status:\s*.+\n?', '', body, flags=re.MULTILINE)
+
+        evidence = ""
+        evidence_match = re.search(r'^Evidence:\s*(.+)$', body, re.MULTILINE)
+        if evidence_match:
+            evidence = evidence_match.group(1).strip()
+            body = re.sub(r'^Evidence:\s*.+\n?', '', body, flags=re.MULTILINE)
+
+        reconfirmed_at = ""
+        reconfirmed_count = 0
+        reconfirmed_match = re.search(r'^Reconfirmed:\s*(\S+)(?:\s*\((\d+)\))?\s*$', body, re.MULTILINE)
+        if reconfirmed_match:
+            reconfirmed_at = reconfirmed_match.group(1).strip()
+            reconfirmed_count = int(reconfirmed_match.group(2) or 0)
+            body = re.sub(r'^Reconfirmed:\s*.+\n?', '', body, flags=re.MULTILINE)
+
+        reviewed_at = ""
+        reviewed_match = re.search(r'^Reviewed:\s*(.+)$', body, re.MULTILINE)
+        if reviewed_match:
+            reviewed_at = reviewed_match.group(1).strip()
+            body = re.sub(r'^Reviewed:\s*.+\n?', '', body, flags=re.MULTILINE)
+
         content_text = body.strip()
         if content_text:
             memories.append(Memory(
@@ -255,6 +308,11 @@ def parse_knowledge_text(content: str) -> list[Memory]:
                 content=content_text,
                 tags=tags,
                 changed_at=changed_at,
+                status=status,
+                evidence=evidence,
+                reconfirmed_at=reconfirmed_at,
+                reconfirmed_count=reconfirmed_count,
+                reviewed_at=reviewed_at,
             ))
 
     return memories
@@ -279,6 +337,14 @@ def render_knowledge(memories: list[Memory]) -> str:
             lines.append(f"Tags: {', '.join(memory.tags)}\n")
         if memory.changed_at:
             lines.append(f"Changed: {memory.changed_at}\n")
+        if memory.status:
+            lines.append(f"Status: {memory.status}\n")
+        if memory.evidence:
+            lines.append(f"Evidence: {memory.evidence}\n")
+        if memory.reconfirmed_at:
+            lines.append(f"Reconfirmed: {memory.reconfirmed_at} ({memory.reconfirmed_count})\n")
+        if memory.reviewed_at:
+            lines.append(f"Reviewed: {memory.reviewed_at}\n")
         lines.append(f"\n{memory.content}\n\n")
 
     return "".join(lines)
@@ -325,7 +391,8 @@ def _mutate_store(
     if parse_text(text) != new_entries:
         raise StoreFormatError(
             "refusing to write: the entry content contains a line that parses as "
-            "entry structure (a '## [id]' header or a Category:/Tags:/Changed: line). "
+            "entry structure (a '## [id]' header, or a Category:/Tags:/Changed:/"
+            "Status:/Evidence:/Reconfirmed:/Reviewed: line). "
             "Indent or escape that line, then retry."
         )
     _atomic_replace(path, text)
@@ -589,14 +656,123 @@ def generate_session_id(category: str, content: str) -> str:
 
 
 # =============================================================================
+# PROVENANCE AND DUPLICATES
+# =============================================================================
+
+def _normalize_content(text: str) -> str:
+    """Exact-match form: lowercase, collapsed whitespace, no trailing punctuation."""
+    return re.sub(r"\s+", " ", text.strip().lower()).strip(" .;:,!")
+
+
+def _normalize_evidence(text: str) -> str:
+    """One line, bounded: evidence names a source, it is never a transcript."""
+    return re.sub(r"\s+", " ", (text or "").strip())[:EVIDENCE_MAX_CHARS]
+
+
+def _merge_evidence(current: str, new: str) -> str:
+    """Append a distinct evidence string up to the cap; keep the first on overflow."""
+    if not new:
+        return current
+    if not current:
+        return new
+    if new in current:
+        return current
+    merged = f"{current}; {new}"
+    return merged[:EVIDENCE_MAX_CHARS]
+
+
+def _status_rank(status: str) -> int:
+    return {"observed": 2, "proposed": 1}.get(status, 0)
+
+
+def _find_exact(content: str, memories: list["Memory"]) -> "Memory | None":
+    """The entry whose text is identical after normalization, if any.
+
+    Exact only: a near-identical entry is reported as a candidate and never
+    merged — two templated config facts can differ by a single token, and a
+    silent merge is a data-loss path the writer never sees.
+    """
+    target = _normalize_content(content)
+    for memory in memories:
+        if _normalize_content(memory.content) == target:
+            return memory
+    return None
+
+
+def _closest_match(content: str, memories: list["Memory"]) -> tuple["Memory | None", float]:
+    """Highest Jaccard against existing entries — advisory only, never merges."""
+    target_tokens = set(_tokenize_for_bm25(content))
+    if len(target_tokens) < MIN_SIMILARITY_TOKENS:
+        return None, 0.0
+    best: Memory | None = None
+    best_score = 0.0
+    for memory in memories:
+        tokens = set(_tokenize_for_bm25(_memory_doc_text(memory)))
+        if len(tokens) < MIN_SIMILARITY_TOKENS:
+            continue
+        shared = target_tokens & tokens
+        if not shared:
+            continue
+        score = len(shared) / len(target_tokens | tokens)
+        if score > best_score:
+            best, best_score = memory, score
+    return best, best_score
+
+
+def _age_days(memory: Memory) -> int | None:
+    """Days since the entry was last reviewed (falls back to Changed)."""
+    stamp = memory.reviewed_at or memory.changed_at
+    if not stamp:
+        return None
+    try:
+        then = datetime.fromisoformat(stamp)
+    except ValueError:
+        return None
+    return max(0, (datetime.now() - then).days)
+
+
+def _stale_threshold(status: str) -> int:
+    return {
+        "observed": STALE_OBSERVED_DAYS,
+        "proposed": STALE_PROPOSED_DAYS,
+    }.get(status, STALE_UNVERIFIED_DAYS)
+
+
+def _is_stale(memory: Memory) -> bool:
+    age = _age_days(memory)
+    return age is not None and age > _stale_threshold(memory.status)
+
+
+# =============================================================================
 # COMMANDS - KNOWLEDGE
 # =============================================================================
 
-def cmd_add(category: str, content: str, tags: list[str] | None = None) -> dict[str, Any]:
-    """Add a new memory."""
+def cmd_add(
+    category: str,
+    content: str,
+    tags: list[str] | None = None,
+    status: str = "",
+    evidence: str = "",
+    force: bool = False,
+) -> dict[str, Any]:
+    """Add a memory, or reconfirm an equivalent existing one."""
     content = content.strip()
     if not content:
         return {"status": "error", "message": "Content cannot be empty"}
+
+    status = (status or "").strip().lower()
+    if status not in ["", *STATUSES]:
+        return {
+            "status": "error",
+            "message": f"Invalid status: {status}. Valid: {', '.join(STATUSES)} (or omit it)",
+        }
+    evidence = _normalize_evidence(evidence)
+    if status == "observed" and not evidence:
+        return {
+            "status": "error",
+            "message": "`--status observed` requires `--evidence \"<path:line | exact command | report path>\"` "
+                       "— no line to paste means the entry is proposed.",
+        }
 
     # Validate category
     cat_lower = category.lower()
@@ -604,15 +780,56 @@ def cmd_add(category: str, content: str, tags: list[str] | None = None) -> dict[
         cat_lower = "misc"
 
     normalized_tags = [t.strip() for t in (tags or []) if t.strip()]
-    memory_id = generate_memory_id(cat_lower, content)
     now = datetime.now().isoformat()
 
+    memories = parse_knowledge_file()
+    existing = _find_exact(content, memories)
+    if existing is not None and not force:
+        reconfirmed: dict[str, Any] = {}
+
+        def reconfirm(entries: list[Memory]) -> list[Memory]:
+            for memory in entries:
+                if memory.id != existing.id:
+                    continue
+                memory.reconfirmed_at = now
+                memory.reconfirmed_count += 1
+                memory.reviewed_at = now
+                memory.tags = sorted(set(memory.tags) | set(normalized_tags))
+                memory.evidence = _merge_evidence(memory.evidence, evidence)
+                if _status_rank(status) > _status_rank(memory.status):
+                    memory.status = status
+                reconfirmed["memory"] = memory
+                return entries
+            raise KeyError(existing.id)
+
+        try:
+            _mutate_store(KNOWLEDGE_FILE, parse_knowledge_text, render_knowledge, reconfirm)
+        except KeyError:
+            return {"status": "error", "message": f"Not found: {existing.id}"}
+
+        memory = reconfirmed["memory"]
+        return {
+            "status": "reconfirmed",
+            "message": f"Reconfirmed: {memory.id} (x{memory.reconfirmed_count}) — no new entry",
+            "memory": memory.to_dict(),
+        }
+
+    memory_id = generate_memory_id(cat_lower, content)
+    taken = {m.id for m in memories}
+    if memory_id in taken:  # same content forced twice within one second
+        base_id, suffix = memory_id, 2
+        while memory_id in taken:
+            memory_id = f"{base_id}-{suffix}"
+            suffix += 1
     memory = Memory(
         id=memory_id,
         category=cat_lower,
         content=content,
         tags=normalized_tags,
         changed_at=now,
+        status=status,
+        evidence=evidence,
+        reviewed_at=now,
     )
 
     _mutate_store(
@@ -622,11 +839,18 @@ def cmd_add(category: str, content: str, tags: list[str] | None = None) -> dict[
         lambda memories: memories + [memory],
     )
 
-    return {
+    result: dict[str, Any] = {
         "status": "success",
         "message": f"Memory added: {memory_id}",
         "memory": memory.to_dict(),
     }
+    closest, score = _closest_match(content, memories)
+    if closest is not None and score >= SIMILARITY_THRESHOLD:
+        result["similar"] = {"id": closest.id, "score": round(score, 2)}
+        result["message"] += (
+            f" (similar to {closest.id} at {score:.2f} — consider `update {closest.id}` instead)"
+        )
+    return result
 
 
 def cmd_search(query: str, limit: int = 10, category: str | None = None) -> dict[str, Any]:
@@ -645,6 +869,9 @@ def cmd_search(query: str, limit: int = 10, category: str | None = None) -> dict
                 "content": m.content,
                 "tags": m.tags,
                 "score": round(score, 2),
+                "status": m.status,
+                "evidence": m.evidence,
+                "reconfirmed": m.reconfirmed_count,
             }
             for m, score in results
         ],
@@ -661,9 +888,12 @@ def cmd_context(topic: str, limit: int = 5) -> dict[str, Any]:
 
     lines = [f"## Relevant context for: {topic}\n"]
     for memory, _ in results:
-        lines.append(f"### [{memory.category}] {memory.id}")
+        badge = f" [{memory.status}]" if memory.status else ""
+        lines.append(f"### [{memory.category}] {memory.id}{badge}")
         if memory.tags:
             lines.append(f"Tags: {', '.join(memory.tags)}")
+        if memory.evidence:
+            lines.append(f"Evidence: {memory.evidence}")
         lines.append(f"\n{memory.content}\n")
 
     return {"topic": topic, "context": "\n".join(lines)}
@@ -709,9 +939,11 @@ def cmd_update(
     content: str | None = None,
     tags: list[str] | None = None,
     category: str | None = None,
+    status: str | None = None,
+    evidence: str | None = None,
 ) -> dict[str, Any]:
-    """Update a memory's content, tags, or category in place."""
-    if content is None and tags is None and category is None:
+    """Update a memory's content, tags, category, provenance or evidence in place."""
+    if content is None and tags is None and category is None and status is None and evidence is None:
         return {"status": "error", "message": "Nothing to update"}
 
     if content is not None:
@@ -725,6 +957,16 @@ def cmd_update(
             "message": f"Invalid category: {category}. Valid: {', '.join(CATEGORIES)}",
         }
 
+    if status is not None:
+        status = status.strip().lower()
+        if status not in ["", *STATUSES]:
+            return {
+                "status": "error",
+                "message": f"Invalid status: {status}. Valid: {', '.join(STATUSES)} (or empty to clear)",
+            }
+
+    evidence = _normalize_evidence(evidence) if evidence is not None else None
+
     updated: dict[str, Memory] = {}
 
     def mutate(memories: list[Memory]) -> list[Memory]:
@@ -737,7 +979,16 @@ def cmd_update(
                 memory.tags = [t.strip() for t in tags if t.strip()]
             if category is not None:
                 memory.category = category.lower()
+            if status is not None:
+                memory.status = status
+            if evidence is not None:
+                memory.evidence = evidence
+            if memory.status == "observed" and not memory.evidence:
+                raise ValueError(
+                    "`status: observed` requires an evidence line — use `--evidence`"
+                )
             memory.changed_at = datetime.now().isoformat()
+            memory.reviewed_at = memory.changed_at
             updated["memory"] = memory
             return memories
         raise KeyError(memory_id)
@@ -746,6 +997,8 @@ def cmd_update(
         _mutate_store(KNOWLEDGE_FILE, parse_knowledge_text, render_knowledge, mutate)
     except KeyError:
         return {"status": "error", "message": f"Not found: {memory_id}"}
+    except ValueError as error:
+        return {"status": "error", "message": str(error)}
 
     return {
         "status": "success",
@@ -759,12 +1012,16 @@ def cmd_stats() -> dict[str, Any]:
     memories = parse_knowledge_file()
 
     by_category: dict[str, int] = {}
+    by_status: dict[str, int] = {}
     for m in memories:
         by_category[m.category] = by_category.get(m.category, 0) + 1
+        bucket = m.status or "unverified"
+        by_status[bucket] = by_status.get(bucket, 0) + 1
 
     return {
         "total_memories": len(memories),
         "by_category": dict(sorted(by_category.items(), key=lambda x: x[1], reverse=True)),
+        "by_status": dict(sorted(by_status.items(), key=lambda x: x[1], reverse=True)),
     }
 
 
@@ -828,10 +1085,16 @@ def _similar_pairs(memories: list[Memory]) -> list[dict[str, Any]]:
 
 
 def cmd_check(limit: int = 10) -> dict[str, Any]:
-    """Report structural defects and likely duplicate/superseded entries."""
+    """Report structural defects, likely duplicates, and stale entries."""
     memories = parse_knowledge_file()
     structural = _structural_issues(memories)
     similar = _similar_pairs(memories)
+    stale = [
+        {"id": m.id, "age_days": _age_days(m), "status": m.status or "unverified"}
+        for m in memories
+        if _is_stale(m)
+    ]
+    stale.sort(key=lambda item: item["age_days"] or 0, reverse=True)
 
     return {
         "total": len(memories),
@@ -839,6 +1102,8 @@ def cmd_check(limit: int = 10) -> dict[str, Any]:
         "structural": structural,
         "similar_count": len(similar),
         "similar": similar[:limit],
+        "stale_count": len(stale),
+        "stale": stale[:limit],
     }
 
 
@@ -1036,26 +1301,10 @@ def cmd_session_archive(entry_id: str, category: str | None = None) -> dict[str,
     if target_cat not in CATEGORIES:
         target_cat = "discovery"
 
-    # Create memory
-    memory_id = generate_memory_id(target_cat, target.content)
-    now = datetime.now().isoformat()
-
-    memory = Memory(
-        id=memory_id,
-        category=target_cat,
-        content=target.content,
-        tags=[],
-        changed_at=now,
-    )
-
-    # Add to knowledge, then remove from session. Two stores, two atomic writes;
-    # the duplicate-on-failure window is unchanged from the previous behavior.
-    _mutate_store(
-        KNOWLEDGE_FILE,
-        parse_knowledge_text,
-        render_knowledge,
-        lambda memories: memories + [memory],
-    )
+    # Route through add: archiving must not create a duplicate either.
+    added = cmd_add(target_cat, target.content)
+    if added.get("status") == "error":
+        return added
 
     def remove(entries: list[SessionEntry]) -> list[SessionEntry]:
         kept = [e for e in entries if e.id != entry_id]
@@ -1068,13 +1317,13 @@ def cmd_session_archive(entry_id: str, category: str | None = None) -> dict[str,
     except KeyError:
         return {
             "status": "error",
-            "message": f"Knowledge entry {memory_id} was written, but session entry {entry_id} disappeared concurrently",
+            "message": f"Knowledge entry {added.get('memory', {}).get('id', '?')} was written, but session entry {entry_id} disappeared concurrently",
         }
 
     return {
         "status": "success",
-        "message": f"Archived: {entry_id} -> {memory_id}",
-        "memory": memory.to_dict(),
+        "message": f"Archived: {entry_id} -> {added.get('memory', {}).get('id', '?')}",
+        "memory": added.get("memory"),
     }
 
 
@@ -1190,9 +1439,12 @@ def format_output(data: dict[str, Any], fmt: str = "text") -> str:
     if "results" in data and "query" in data:
         lines = [f'Search: "{data["query"]}" ({data["count"]} results)\n']
         for r in data["results"]:
-            lines.append(f"[{r['category']}] {r['id']}")
+            badge = f" [{r['status']}]" if r.get("status") else ""
+            lines.append(f"[{r['category']}] {r['id']}{badge}")
             if r.get("tags"):
                 lines.append(f"  Tags: {', '.join(r['tags'])}")
+            if r.get("evidence"):
+                lines.append(f"  Evidence: {r['evidence']}")
             content = r.get("content", "")
             for line in content.split("\n"):
                 lines.append(f"  {line}")
@@ -1218,6 +1470,10 @@ def format_output(data: dict[str, Any], fmt: str = "text") -> str:
         lines.append("By category:")
         for cat, count in data["by_category"].items():
             lines.append(f"  {cat}: {count}")
+        if data.get("by_status"):
+            lines.append("By status:")
+            for status, count in data["by_status"].items():
+                lines.append(f"  {status}: {count}")
         return "\n".join(lines)
 
     # Session current
@@ -1243,7 +1499,21 @@ def format_output(data: dict[str, Any], fmt: str = "text") -> str:
     # Single memory/entry
     if "memory" in data:
         m = data["memory"]
-        return f"[{m['category']}] {m['id']}\n{m['content']}"
+        badge = f" [{m.get('status')}]" if m.get("status") else ""
+        lines = [f"[{m['category']}] {m['id']}{badge}"]
+        if data.get("status") == "reconfirmed" and data.get("message"):
+            lines.insert(0, data["message"])
+        if m.get("evidence"):
+            lines.append(f"Evidence: {m['evidence']}")
+        if m.get("reconfirmed_count"):
+            lines.append(f"Reconfirmed: {m.get('reconfirmed_at', '')} ({m['reconfirmed_count']})")
+        lines.append(m["content"])
+        if data.get("similar"):
+            similar = data["similar"]
+            lines.append(
+                f"similar: {similar['id']} ({similar['score']}) — consider `update {similar['id']}` instead"
+            )
+        return "\n".join(lines)
 
     if "entry" in data:
         e = data["entry"]
@@ -1271,6 +1541,15 @@ def format_output(data: dict[str, Any], fmt: str = "text") -> str:
                 )
         else:
             lines.append("  none")
+        stale = data.get("stale") or []
+        stale_note = f" (showing {len(stale)})" if data.get("stale_count", 0) > len(stale) else ""
+        lines.append("")
+        lines.append(f"Stale entries: {data.get('stale_count', 0)}{stale_note} (advisory — nothing is deleted)")
+        if stale:
+            for item in stale:
+                lines.append(f"  - [{item['id']}] {item['age_days']}d ({item['status']})")
+        else:
+            lines.append("  none")
         return "\n".join(lines)
 
     # Message
@@ -1290,13 +1569,13 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=f"""
 Commands:
-  add <category> <content>    Add a memory
+  add <category> <content>    Add a memory (or reconfirm an equivalent one)
   update <id> [content]       Update a memory in place
   search <query>              Search memories
   context <topic>             Get context for topic
   list                        List memories
   delete <id>                 Delete a memory
-  check                       Report store defects and duplicate candidates
+  check                       Report store defects, duplicates and stale entries
   stats                       Show statistics
 
 Session Commands:
@@ -1332,7 +1611,9 @@ Session Statuses: {', '.join(SESSION_STATUSES)}
     parser.add_argument("--tags", "-t", help="Comma-separated tags")
     parser.add_argument("--limit", "-l", type=int, default=10, help="Limit results")
     parser.add_argument("--category", "-c", help="Filter by category")
-    parser.add_argument("--status", "-s", help="Filter/set status")
+    parser.add_argument("--status", "-s", help="Memory status (observed|proposed) or session status filter")
+    parser.add_argument("--evidence", "-e", help="Provenance line for a memory (required with --status observed)")
+    parser.add_argument("--force", "-f", action="store_true", help="Add even when an equivalent entry exists")
     parser.add_argument("--session", "-S", help="Session name (overrides env/pointer)")
     parser.add_argument("--all", dest="clear_all", action="store_true", help="Clear all sessions")
     parser.add_argument("--output", "-o", choices=["text", "json"], default="text", help="Output format")
@@ -1353,7 +1634,14 @@ Session Statuses: {', '.join(SESSION_STATUSES)}
                 print("Error: add requires <category> <content>", file=sys.stderr)
                 sys.exit(1)
             tags = [t.strip() for t in args.tags.split(",") if t.strip()] if args.tags else []
-            result = cmd_add(args.args[0], " ".join(args.args[1:]), tags)
+            result = cmd_add(
+                args.args[0],
+                " ".join(args.args[1:]),
+                tags,
+                status=args.status or "",
+                evidence=args.evidence or "",
+                force=args.force,
+            )
 
         elif args.command == "update":
             if not args.args:
@@ -1370,6 +1658,8 @@ Session Statuses: {', '.join(SESSION_STATUSES)}
                 content=content,
                 tags=tags,
                 category=args.category,
+                status=args.status,
+                evidence=args.evidence,
             )
 
         elif args.command == "search":

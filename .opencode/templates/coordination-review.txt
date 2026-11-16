@@ -8,6 +8,7 @@ MEMORY USE (READ-ONLY):
 - Before starting, run prior-art searches on the task's main topics and read the hits, letting a relevant entry shape your approach rather than just annotate the report (as many searches as the task needs):
     ./.opencode/tools/memory.sh search "<topic>"  (memory.bat on Windows)
   (read verbs only: search / list; reading knowledge.md at the repo root is fine)
+- On the SECOND failure of the same command (same program and subcommand): before changing it, run one `memory.sh search "<program> <domain noun>"` (e.g. `rsync mount`, `pytest hang`) — never the raw traceback. Nothing relevant → do not repeat it for that command.
 - NEVER add/delete/update knowledge or run session subcommands — writing is the main model's job.
 - Missing tool or failed search: continue immediately, no retries.
 - Report one line: Memory search: "<query>" -> N relevant (<short summary>) — or "memory not available".
