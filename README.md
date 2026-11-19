@@ -1,6 +1,6 @@
 # Single-Session OpenCode
 
-A single-session agent suite for [OpenCode](https://opencode.ai) (v1 & v2): the model does the work itself in dialog with you, and calls in specialized subagents when the work is big or context-heavy. Works with any LLM provider.
+A single-session agent suite for [OpenCode](https://opencode.ai) V2: the model does the work itself in dialog with you, and calls in specialized subagents when the work is big or context-heavy. Works with any LLM provider.
 
 ## Quick Start
 
@@ -26,7 +26,7 @@ The shipped `opencode.json` allows all operations by default. Delete or tweak it
   - **T2 — researched executor** — `prepare-agent` ALWAYS researches the task's technologies into a full research report + compact digest that the executor carries as its briefing (the spawn is mandatory).
   - **T3 — full workflow** — for any complex issue, always researched (mandatory prepare at issue start): review agents gather research + discovery + review → research-backed second opinion at MEDIUM+ → adversarial verification → fixes.
 - **Continuation handoff** — a fixed 8-section carry-over so a fresh agent or later session resumes without re-discovery: R3 run retirement uses it automatically, and `/handoff` checkpoints a session on demand.
-- **Compaction handoff (V2)** — compaction writes the same 8-section handoff to `.opencode/handoff/` and prompts a workspace check on the next turn.
+- **Compaction handoff** — compaction writes the same 8-section handoff to `.opencode/handoff/` and prompts a workspace check on the next turn.
 - **Memory that survives** — two-tier knowledge/session memory via `memory.sh`.
 
 ### Optional: DeepSeek search
@@ -55,7 +55,7 @@ The API key is read from `provider.deepseek.options.apiKey` in `~/.config/openco
 
 ## Requirements
 
-- [OpenCode CLI](https://opencode.ai) — **V1 1.18.29+** or **V2 2.0+**
+- [OpenCode CLI](https://opencode.ai) — **V2 2.0+**
 - At least one LLM provider configured in `~/.config/opencode/opencode.json`
 - `uv` — auto-installed repo-locally into `tmp/uv/` if missing (never system-wide, per the AGENTS.md tool-use policy); handles Python dependencies for the tools
 
